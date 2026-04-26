@@ -27,6 +27,11 @@ func NewCmdTools() *CmdTools {
 				Description: "List directory contents",
 				Execute:     executeLS,
 			},
+			"read": {
+				Name:        "read",
+				Description: "Read file contents",
+				Execute:     executeRead,
+			},
 		},
 	}
 }
@@ -51,6 +56,19 @@ func executeLS(args []string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+func executeRead(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("usage: read ")
+	}
+	path := args[0]
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("cannot read %s: %w", path, err)
+	}
+	return string(data), nil
 }
 
 // ExecuteTool runs a tool by name with optional arguments

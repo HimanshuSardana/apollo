@@ -37,18 +37,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println(Bold + Cyan + "Apollo AI Assistant" + Reset)
-	fmt.Println(Gray + "Type your prompt and press Enter to send. Type 'quit' to exit." + Reset)
-	fmt.Println(Gray + "Available tools: ls" + Reset)
+	fmt.Println(Bold+Cyan+"Apollo AI Assistant"+Reset)
+	fmt.Println(Gray+"Type your prompt and press Enter to send. Type 'quit' to exit."+Reset)
+	fmt.Println(Gray+"Available tools: ls, read"+Reset)
 	fmt.Println()
 
 	reader := bufio.NewReader(os.Stdin)
 	messages := []Message{
-		{Role: "system", Content: "You are Apollo, an AI coding assistant.\n\nAvailable tools:\n- ls: List directory contents\n\nBe helpful and concise."},
+		{Role: "system", Content: "You are Apollo, an AI coding assistant.\n\nAvailable tools:\n- ls: List directory contents\n- read: Read file contents\n\nBe helpful and concise."},
 	}
 
 	for {
-		fmt.Print(Blue + "You: " + Reset)
+		fmt.Print(Blue+"You: "+Reset)
 		prompt, err := reader.ReadString('\n')
 		if err != nil {
 			break
@@ -67,9 +67,9 @@ func main() {
 			if len(parts) > 0 {
 				result, err := ExecuteTool(parts[0], parts[1:])
 				if err != nil {
-					fmt.Printf(Red + "Error: %v" + Reset + "\n\n", err)
+					fmt.Printf(Red+"Error: %v"+Reset+"\n\n", err)
 				} else {
-					fmt.Printf(Green + "Result: %s" + Reset + "\n\n", result)
+					fmt.Printf(Green+"Result: %s"+Reset+"\n\n", result)
 				}
 			}
 			continue
@@ -77,38 +77,43 @@ func main() {
 
 		messages = append(messages, Message{Role: "user", Content: prompt})
 
-		fmt.Println(Dim + "Thinking..." + Reset)
+		fmt.Println(Dim+"Thinking..."+Reset)
 
-		resp, toolCallID, err := sendRequest(client, apiKey, messages)
+		resp, toolCall, err := sendRequest(client, apiKey, messages)
 		if err != nil {
-			fmt.Printf(Red + "Error: %v" + Reset + "\n\n", err)
+			fmt.Printf(Red+"Error: %v"+Reset+"\n\n", err)
 			messages = messages[:len(messages)-1]
 			continue
 		}
 
 		// Execute tool if present
-		if toolCallID != "" {
+		if toolCall != nil {
+			arguments := "{}"
+			if len(toolCall.Args) > 0 {
+				arguments = `{"path":"` + toolCall.Args[0] + `"}`
+			}
+			
 			// Add assistant message with tool call
 			messages = append(messages, Message{
 				Role:      "assistant",
 				Content:   " ", // must not be empty
-				ToolCalls: []ToolCallInfo{{ID: toolCallID, Type: "function", Function: FC{Name: "ls", Arguments: "{}"}}},
+				ToolCalls: []ToolCallInfo{{ID: "call_1", Type: "function", Function: FC{Name: toolCall.Name, Arguments: arguments}}},
 			})
 
 			// Execute tool
-			fmt.Print(Green + "Executing: ls" + Reset + "\n")
-			result, err := ExecuteTool("ls", nil)
+			fmt.Print(Green+"Executing: "+Reset+toolCall.Name+"\n")
+			result, err := ExecuteTool(toolCall.Name, toolCall.Args)
 			if err != nil {
-				messages = append(messages, Message{Role: "tool", ToolCallID: toolCallID, Content: fmt.Sprintf("Error: %v", err)})
+				messages = append(messages, Message{Role: "tool", ToolCallID: "call_1", Content: fmt.Sprintf("Error: %v", err)})
 			} else {
-				messages = append(messages, Message{Role: "tool", ToolCallID: toolCallID, Content: result})
+				messages = append(messages, Message{Role: "tool", ToolCallID: "call_1", Content: result})
 			}
 
 			// Get final response
-			fmt.Println(Dim + "Thinking..." + Reset)
+			fmt.Println(Dim+"Thinking..."+Reset)
 			resp, _, err = sendRequest(client, apiKey, messages)
 			if err != nil {
-				fmt.Printf(Red + "Error: %v" + Reset + "\n\n", err)
+				fmt.Printf(Red+"Error: %v"+Reset+"\n\n", err)
 				continue
 			}
 		}
@@ -137,6 +142,12 @@ type ToolCallInfo struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
 	Function FC `json:"function"`
+}
+
+// ToolCall represents a tool invocation
+type ToolCall struct {
+	Name string
+	Args []string
 }
 
 // Request structure for API
@@ -171,7 +182,7 @@ type Response struct {
 	Choices []Choice `json:"choices"`
 }
 
-func sendRequest(client *http.Client, apiKey string, messages []Message) (string, string, error) {
+func sendRequest(client *http.Client, apiKey string, messages []Message) (string, *ToolCall, error) {
 	// Define available tools
 	lsTool := ToolDef{
 		Type: "function",
@@ -189,22 +200,39 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 			},
 		},
 	}
+	
+	readTool := ToolDef{
+		Type: "function",
+		Function: struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Parameters  any    `json:"parameters"`
+		}{
+			Name:        "read",
+			Description: "Read file contents",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"path": map[string]any{"type": "string"}},
+				"required":   []any{"path"},
+			},
+		},
+	}
 
 	reqBody := Request{
 		Model:    "minimax-m2.5",
 		Messages: messages,
-		Tools:    []ToolDef{lsTool},
+		Tools:    []ToolDef{lsTool, readTool},
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 
 	req, err := http.NewRequestWithContext(context.Background(), "POST",
 		"https://opencode.ai/zen/go/v1/chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -212,30 +240,46 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("API returned status %d", resp.StatusCode)
+		return "", nil, fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
 
 	var chatResp Response
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return "", "", err
+		return "", nil, err
 	}
 
 	if len(chatResp.Choices) == 0 {
-		return "", "", fmt.Errorf("no response from API")
+		return "", nil, fmt.Errorf("no response from API")
 	}
 
 	msg := chatResp.Choices[0].Message
 
 	// Check for tool call
-	var toolCallID string
+	var toolCall *ToolCall
 	if len(msg.ToolCalls) > 0 {
-		toolCallID = msg.ToolCalls[0].ID
+		tc := msg.ToolCalls[0]
+		toolCall = &ToolCall{
+			Name: tc.Function.Name,
+			Args: parseToolArgs(tc.Function.Arguments),
+		}
 	}
 
-	return msg.Content, toolCallID, nil
+	return msg.Content, toolCall, nil
+}
+
+// parseToolArgs extracts arguments from JSON string
+func parseToolArgs(args string) []string {
+	var argsMap map[string]any
+	if err := json.Unmarshal([]byte(args), &argsMap); err != nil {
+		return nil
+	}
+	if path, ok := argsMap["path"].(string); ok {
+		return []string{path}
+	}
+	return nil
 }
