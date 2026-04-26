@@ -7,19 +7,21 @@ import (
 	"strings"
 )
 
-type Tool struct {
+// ExecTool represents an executable shell tool
+type ExecTool struct {
 	Name        string
 	Description string
 	Execute     func(args []string) (string, error)
 }
 
-type Tools struct {
-	tools map[string]Tool
+// CmdTools holds all available executables
+type CmdTools struct {
+	tools map[string]ExecTool
 }
 
-func NewTools() *Tools {
-	return &Tools{
-		tools: map[string]Tool{
+func NewCmdTools() *CmdTools {
+	return &CmdTools{
+		tools: map[string]ExecTool{
 			"ls": {
 				Name:        "ls",
 				Description: "List directory contents",
@@ -29,17 +31,9 @@ func NewTools() *Tools {
 	}
 }
 
-func (t *Tools) Get(name string) (Tool, bool) {
+func (t *CmdTools) Get(name string) (ExecTool, bool) {
 	tool, ok := t.tools[name]
 	return tool, ok
-}
-
-func (t *Tools) List() []Tool {
-	var list []Tool
-	for _, tool := range t.tools {
-		list = append(list, tool)
-	}
-	return list
 }
 
 func executeLS(args []string) (string, error) {
@@ -61,7 +55,7 @@ func executeLS(args []string) (string, error) {
 
 // ExecuteTool runs a tool by name with optional arguments
 func ExecuteTool(name string, args []string) (string, error) {
-	tools := NewTools()
+	tools := NewCmdTools()
 	tool, ok := tools.Get(name)
 	if !ok {
 		return "", fmt.Errorf("tool not found: %s", name)
@@ -74,4 +68,3 @@ func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
-
