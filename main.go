@@ -11,6 +11,24 @@ import (
 	"strings"
 )
 
+// ANSI color codes
+const (
+	Reset   = "\033[0m"
+	Bold    = "\033[1m"
+	Dim     = "\033[2m"
+	
+	Black   = "\033[30m"
+	Red     = "\033[31m"
+	Green   = "\033[32m"
+	Yellow  = "\033[33m"
+	Blue    = "\033[34m"
+	Magenta = "\033[35m"
+	Cyan    = "\033[36m"
+	White   = "\033[37m"
+	
+	Gray    = "\033[90m"
+)
+
 func main() {
 	client := &http.Client{}
 	apiKey := os.Getenv("OPENCODE_API_KEY")
@@ -19,9 +37,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("Apollo AI Assistant")
-	fmt.Println("Type your prompt and press Enter to send. Type 'quit' to exit.")
-	fmt.Println("Available tools: ls")
+	fmt.Println(Bold + Cyan + "Apollo AI Assistant" + Reset)
+	fmt.Println(Gray + "Type your prompt and press Enter to send. Type 'quit' to exit." + Reset)
+	fmt.Println(Gray + "Available tools: ls" + Reset)
 	fmt.Println()
 
 	reader := bufio.NewReader(os.Stdin)
@@ -30,7 +48,7 @@ func main() {
 	}
 
 	for {
-		fmt.Print("You: ")
+		fmt.Print(Blue + "You: " + Reset)
 		prompt, err := reader.ReadString('\n')
 		if err != nil {
 			break
@@ -49,9 +67,9 @@ func main() {
 			if len(parts) > 0 {
 				result, err := ExecuteTool(parts[0], parts[1:])
 				if err != nil {
-					fmt.Printf("Error: %v\n\n", err)
+					fmt.Printf(Red + "Error: %v" + Reset + "\n\n", err)
 				} else {
-					fmt.Printf("Result: %s\n\n", result)
+					fmt.Printf(Green + "Result: %s" + Reset + "\n\n", result)
 				}
 			}
 			continue
@@ -59,11 +77,11 @@ func main() {
 
 		messages = append(messages, Message{Role: "user", Content: prompt})
 
-		fmt.Println("Thinking...")
+		fmt.Println(Dim + "Thinking..." + Reset)
 
 		resp, toolCallID, err := sendRequest(client, apiKey, messages)
 		if err != nil {
-			fmt.Printf("Error: %v\n\n", err)
+			fmt.Printf(Red + "Error: %v" + Reset + "\n\n", err)
 			messages = messages[:len(messages)-1]
 			continue
 		}
@@ -78,7 +96,7 @@ func main() {
 			})
 
 			// Execute tool
-			fmt.Printf("Executing: ls\n")
+			fmt.Print(Green + "Executing: ls" + Reset + "\n")
 			result, err := ExecuteTool("ls", nil)
 			if err != nil {
 				messages = append(messages, Message{Role: "tool", ToolCallID: toolCallID, Content: fmt.Sprintf("Error: %v", err)})
@@ -87,16 +105,16 @@ func main() {
 			}
 
 			// Get final response
-			fmt.Println("Thinking...")
+			fmt.Println(Dim + "Thinking..." + Reset)
 			resp, _, err = sendRequest(client, apiKey, messages)
 			if err != nil {
-				fmt.Printf("Error: %v\n\n", err)
+				fmt.Printf(Red + "Error: %v" + Reset + "\n\n", err)
 				continue
 			}
 		}
 
 		messages = append(messages, Message{Role: "assistant", Content: resp})
-		fmt.Printf("Apollo: %s\n\n", resp)
+		fmt.Printf(Red+"Apollo: "+White+"%s"+Reset+"\n\n", resp)
 	}
 }
 
