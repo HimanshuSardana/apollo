@@ -7,14 +7,12 @@ import (
 	"strings"
 )
 
-// Tool represents an executable tool
 type Tool struct {
 	Name        string
 	Description string
-	Execute    func(args []string) (string, error)
+	Execute     func(args []string) (string, error)
 }
 
-// Tools holds all available tools
 type Tools struct {
 	tools map[string]Tool
 }
@@ -25,7 +23,7 @@ func NewTools() *Tools {
 			"ls": {
 				Name:        "ls",
 				Description: "List directory contents",
-				Execute:    executeLS,
+				Execute:     executeLS,
 			},
 		},
 	}
@@ -76,3 +74,4 @@ func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+

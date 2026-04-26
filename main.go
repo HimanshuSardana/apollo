@@ -21,6 +21,7 @@ func main() {
 
 	fmt.Println("Apollo AI Assistant")
 	fmt.Println("Type your prompt and press Enter to send. Type 'quit' to exit.")
+	fmt.Println("Use /<tool> to execute tools. Available: ls")
 	fmt.Println()
 
 	reader := bufio.NewReader(os.Stdin)
@@ -37,6 +38,26 @@ func main() {
 		}
 		if strings.ToLower(prompt) == "quit" {
 			break
+		}
+
+		// Check for tool command
+		if strings.HasPrefix(prompt, "/") {
+			parts := strings.Fields(prompt[1:])
+			if len(parts) == 0 {
+				fmt.Println("Error: no tool specified")
+				fmt.Println()
+				continue
+			}
+			toolName := parts[0]
+			args := parts[1:]
+
+			result, err := ExecuteTool(toolName, args)
+			if err != nil {
+				fmt.Printf("Error: %v\n\n", err)
+			} else {
+				fmt.Printf("Result: %s\n\n", result)
+			}
+			continue
 		}
 
 		fmt.Println("Thinking...")
@@ -90,7 +111,6 @@ func sendRequest(client *http.Client, apiKey, prompt string) (string, error) {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	// fmt.Printf("API Key: %s", apiKey)
 
 	resp, err := client.Do(req)
 	if err != nil {
