@@ -90,7 +90,7 @@ func sendRequest(client *http.Client, apiKey, prompt string) (string, error) {
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	fmt.Printf("API Key: %s", apiKey)
+	// fmt.Printf("API Key: %s", apiKey)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -113,4 +113,3 @@ func sendRequest(client *http.Client, apiKey, prompt string) (string, error) {
 
 	return chatResp.Choices[0].Message.Content, nil
 }
-
