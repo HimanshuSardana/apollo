@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"regexp"
 	"strings"
 )
 
@@ -27,7 +26,7 @@ func main() {
 
 	reader := bufio.NewReader(os.Stdin)
 	messages := []Message{
-		{Role: "system", Content: "You are Apollo, an AI coding assistant. Available tools:\n\n- ls: List directory contents. Args: [path]. Use 'ls /path' to list specific directory.\n\nWhen user asks to list files, explore directories, or run shell commands, use the ls tool.\nFormat tool calls as: TOOL:tool_name:args\n\nBe helpful, concise, and focus on writing code."},
+		{Role: "system", Content: "You are Apollo, an AI coding assistant.\n\nAvailable tools:\n- ls: List directory contents\n\nBe helpful and concise."},
 	}
 
 	for {
@@ -62,26 +61,32 @@ func main() {
 
 		fmt.Println("Thinking...")
 
-		resp, toolCalls, err := sendRequest(client, apiKey, messages)
+		resp, toolCallID, err := sendRequest(client, apiKey, messages)
 		if err != nil {
 			fmt.Printf("Error: %v\n\n", err)
 			messages = messages[:len(messages)-1]
 			continue
 		}
 
-		// Execute any tool calls
-		for _, tc := range toolCalls {
-			fmt.Printf("Executing: %s %v\n", tc.Name, tc.Args)
-			result, err := ExecuteTool(tc.Name, tc.Args)
-			if err != nil {
-				messages = append(messages, Message{Role: "tool", Content: fmt.Sprintf("Error: %v", err)})
-			} else {
-				messages = append(messages, Message{Role: "tool", Content: result})
-			}
-		}
+		// Execute tool if present
+		if toolCallID != "" {
+			// Add assistant message with tool call
+			messages = append(messages, Message{
+				Role:      "assistant",
+				Content:   " ", // must not be empty
+				ToolCalls: []ToolCallInfo{{ID: toolCallID, Type: "function", Function: FC{Name: "ls", Arguments: "{}"}}},
+			})
 
-		// If tool was called, get final response
-		if len(toolCalls) > 0 {
+			// Execute tool
+			fmt.Printf("Executing: ls\n")
+			result, err := ExecuteTool("ls", nil)
+			if err != nil {
+				messages = append(messages, Message{Role: "tool", ToolCallID: toolCallID, Content: fmt.Sprintf("Error: %v", err)})
+			} else {
+				messages = append(messages, Message{Role: "tool", ToolCallID: toolCallID, Content: result})
+			}
+
+			// Get final response
 			fmt.Println("Thinking...")
 			resp, _, err = sendRequest(client, apiKey, messages)
 			if err != nil {
@@ -97,18 +102,26 @@ func main() {
 
 // Message represents a chat message
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-	Name    string `json:"name,omitempty"`
+	Role      string `json:"role"`
+	Content   string `json:"content,omitempty"`
+	Name      string `json:"name,omitempty"`
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolCalls []ToolCallInfo `json:"tool_calls,omitempty"`
 }
 
-// ToolCall represents a tool invocation
-type ToolCall struct {
-	Name string
-	Args []string
+// ToolCallInfo for function calls
+type FC struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
-// Request structure for OpenAI-compatible API
+type ToolCallInfo struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	Function FC `json:"function"`
+}
+
+// Request structure for API
 type Request struct {
 	Model    string    `json:"model"`
 	Messages []Message `json:"messages"`
@@ -127,7 +140,12 @@ type ToolDef struct {
 
 // Choice from API response
 type Choice struct {
-	Message Message `json:"message"`
+	Message struct {
+		Role      string `json:"role"`
+		Content   string `json:"content"`
+		ToolCalls []ToolCallInfo `json:"tool_calls,omitempty"`
+	} `json:"message"`
+	FinishReason string `json:"finish_reason"`
 }
 
 // Response from API
@@ -135,7 +153,7 @@ type Response struct {
 	Choices []Choice `json:"choices"`
 }
 
-func sendRequest(client *http.Client, apiKey string, messages []Message) (string, []ToolCall, error) {
+func sendRequest(client *http.Client, apiKey string, messages []Message) (string, string, error) {
 	// Define available tools
 	lsTool := ToolDef{
 		Type: "function",
@@ -147,11 +165,9 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 			Name:        "ls",
 			Description: "List directory contents",
 			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"path": map[string]any{"type": "string"},
-				},
-				"required": []any{},
+				"type":       "object",
+				"properties": map[string]any{"path": map[string]any{"type": "string"}},
+				"required":   []any{},
 			},
 		},
 	}
@@ -164,13 +180,13 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", nil, err
+		return "", "", err
 	}
 
 	req, err := http.NewRequestWithContext(context.Background(), "POST",
 		"https://opencode.ai/zen/go/v1/chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
-		return "", nil, err
+		return "", "", err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -178,57 +194,30 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", nil, err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := json.Marshal(messages)
-		return "", nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+		return "", "", fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
 
 	var chatResp Response
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return "", nil, err
+		return "", "", err
 	}
 
 	if len(chatResp.Choices) == 0 {
-		return "", nil, fmt.Errorf("no response from API")
+		return "", "", fmt.Errorf("no response from API")
 	}
 
 	msg := chatResp.Choices[0].Message
 
-	// Parse tool calls from response content
-	toolCalls := parseToolCalls(msg.Content)
-
-	// Remove tool call markers from response
-	content := removeToolCalls(msg.Content)
-
-	return content, toolCalls, nil
-}
-
-// parseToolCalls extracts tool calls from response content
-func parseToolCalls(content string) []ToolCall {
-	var calls []ToolCall
-
-	// Match TOOL:tool_name:args pattern
-	re := regexp.MustCompile(`TOOL:(\w+):(.+)`)
-	matches := re.FindAllStringSubmatch(content, -1)
-
-	for _, match := range matches {
-		if len(match) == 3 {
-			calls = append(calls, ToolCall{
-				Name: match[1],
-				Args: strings.Fields(match[2]),
-			})
-		}
+	// Check for tool call
+	var toolCallID string
+	if len(msg.ToolCalls) > 0 {
+		toolCallID = msg.ToolCalls[0].ID
 	}
 
-	return calls
-}
-
-// removeToolCalls removes tool call markers from content
-func removeToolCalls(content string) string {
-	re := regexp.MustCompile(`TOOL:\w+:.+\n?`)
-	return re.ReplaceAllString(content, "")
+	return msg.Content, toolCallID, nil
 }
