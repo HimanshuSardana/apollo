@@ -17,6 +17,7 @@ var SYSTEM_PROMPT = `You are an AI assistant that helps the user understand and 
 
 - ls [path]: Lists the contents of a directory. Use this to explore the project structure, find files, or see what is in a folder. If no path is provided, it lists the current directory.
 - read <path>: Reads the full contents of a file. Use this to examine source code, configuration files, or documentation. The path argument is required.
+- bash [cmd]: Executes a shell command and returns the output. Use this for tasks that require running commands, such as checking git status, running tests, or using command-line tools. If no cmd is provided, it will open an interactive shell session.
 
 Guidelines for using tools:
 - Use ls when you need to explore the file system, discover files, or verify a directory's contents before reading.
@@ -58,7 +59,7 @@ func main() {
 
 	fmt.Println(Bold + Cyan + "Apollo AI Assistant" + Reset)
 	fmt.Println(Gray + "Type your prompt and press Enter to send. Type 'quit' to exit." + Reset)
-	fmt.Println(Gray + "Available tools: ls, read" + Reset)
+	fmt.Println(Gray + "Available tools: ls, read, bash" + Reset)
 	fmt.Println()
 
 	reader := bufio.NewReader(os.Stdin)
@@ -80,7 +81,6 @@ func main() {
 			break
 		}
 
-		// Check for manual tool command
 		if strings.HasPrefix(prompt, "/") {
 			parts := strings.Fields(prompt[1:])
 			if len(parts) > 0 {
@@ -105,23 +105,23 @@ func main() {
 			continue
 		}
 
-		// Execute tool if present
 		if toolCall != nil {
-			argsMap := map[string]string{}
-			if len(toolCall.Args) > 0 {
-				argsMap["path"] = toolCall.Args[0]
+			arguments := toolCall.RawArgs
+			if arguments == "" {
+				argsMap := map[string]string{}
+				if len(toolCall.Args) > 0 {
+					argsMap["path"] = toolCall.Args[0]
+				}
+				argsBytes, _ := json.Marshal(argsMap)
+				arguments = string(argsBytes)
 			}
-			argsBytes, _ := json.Marshal(argsMap)
-			arguments := string(argsBytes)
 
-			// Add assistant message with tool call
 			messages = append(messages, Message{
 				Role:      "assistant",
-				Content:   " ", // must not be empty
+				Content:   " ",
 				ToolCalls: []ToolCallInfo{{ID: "call_1", Type: "function", Function: FC{Name: toolCall.Name, Arguments: arguments}}},
 			})
 
-			// Execute tool
 			fmt.Print(Green + "Executing: " + Reset + toolCall.Name + "\n")
 			result, err := ExecuteTool(toolCall.Name, toolCall.Args)
 			if err != nil {
@@ -167,8 +167,9 @@ type ToolCallInfo struct {
 
 // ToolCall represents a tool invocation
 type ToolCall struct {
-	Name string
-	Args []string
+	Name    string
+	Args    []string
+	RawArgs string
 }
 
 // Request structure for API
@@ -204,7 +205,6 @@ type Response struct {
 }
 
 func sendRequest(client *http.Client, apiKey string, messages []Message) (string, *ToolCall, error) {
-	// Define available tools
 	lsTool := ToolDef{
 		Type: "function",
 		Function: struct {
@@ -239,16 +239,35 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 		},
 	}
 
+	bashTool := ToolDef{
+		Type: "function",
+		Function: struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Parameters  any    `json:"parameters"`
+		}{
+			Name:        "bash",
+			Description: "Execute a shell command",
+			Parameters: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"cmd": map[string]any{"type": "string"}},
+				"required":   []any{},
+			},
+		},
+	}
+
 	reqBody := Request{
 		Model:    "minimax-m2.5",
 		Messages: messages,
-		Tools:    []ToolDef{lsTool, readTool},
+		Tools:    []ToolDef{lsTool, readTool, bashTool},
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", nil, err
 	}
+
+	fmt.Println(Dim + "Request: " + string(jsonBody) + Reset)
 
 	req, err := http.NewRequestWithContext(context.Background(), "POST",
 		"https://opencode.ai/zen/go/v1/chat/completions", bytes.NewBuffer(jsonBody))
@@ -285,8 +304,9 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 	if len(msg.ToolCalls) > 0 {
 		tc := msg.ToolCalls[0]
 		toolCall = &ToolCall{
-			Name: tc.Function.Name,
-			Args: parseToolArgs(tc.Function.Arguments),
+			Name:    tc.Function.Name,
+			Args:    parseToolArgs(tc.Function.Arguments),
+			RawArgs: tc.Function.Arguments,
 		}
 	}
 
@@ -299,8 +319,11 @@ func parseToolArgs(args string) []string {
 	if err := json.Unmarshal([]byte(args), &argsMap); err != nil {
 		return nil
 	}
-	if path, ok := argsMap["path"].(string); ok {
+	if path, ok := argsMap["path"].(string); ok && path != "" {
 		return []string{path}
+	}
+	if cmd, ok := argsMap["cmd"].(string); ok && cmd != "" {
+		return []string{cmd}
 	}
 	return nil
 }

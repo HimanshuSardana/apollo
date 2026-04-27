@@ -32,6 +32,11 @@ func NewCmdTools() *CmdTools {
 				Description: "Read file contents",
 				Execute:     executeRead,
 			},
+			"bash": {
+				Name:        "bash",
+				Description: "Execute a shell command",
+				Execute:     executeBash,
+			},
 		},
 	}
 }
@@ -60,7 +65,7 @@ func executeLS(args []string) (string, error) {
 
 func executeRead(args []string) (string, error) {
 	if len(args) == 0 {
-		return "", fmt.Errorf("usage: read ")
+		return "", fmt.Errorf("usage: read <path>")
 	}
 	path := args[0]
 
@@ -69,6 +74,19 @@ func executeRead(args []string) (string, error) {
 		return "", fmt.Errorf("cannot read %s: %w", path, err)
 	}
 	return string(data), nil
+}
+
+func executeBash(args []string) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("usage: bash <command>")
+	}
+	command := strings.Join(args, " ")
+	cmd := exec.Command("bash", "-c", command)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("%w: %s", err, string(out))
+	}
+	return string(out), nil
 }
 
 // ExecuteTool runs a tool by name with optional arguments
@@ -86,3 +104,4 @@ func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
