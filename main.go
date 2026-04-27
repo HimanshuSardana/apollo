@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/glamour"
+	"golang.org/x/term"
 )
 
 var (
@@ -67,7 +68,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	renderer, err := glamour.NewTermRenderer(glamour.WithAutoStyle())
+	// Get terminal width for full-width rendering
+	termWidth := 120 // default
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		termWidth = w
+	}
+
+	renderer, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(termWidth),
+	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error: failed to create markdown renderer:", err)
 		os.Exit(1)
@@ -115,56 +125,95 @@ func main() {
 		fmt.Print(Red + "Apollo: " + Reset)
 
 		var outputBuffer strings.Builder
+		var thinkingBuffer strings.Builder
 		var lineCount int
-		resp, toolCall, err := sendRequest(client, apiKey, messages, true, func(chunk string) {
-			outputBuffer.WriteString(chunk)
-			fmt.Print(chunk)
-			lineCount += strings.Count(chunk, "\n")
-		})
-		if err != nil {
-			fmt.Printf(Red+"\nError: %v"+Reset+"\n\n", err)
-			messages = messages[:len(messages)-1]
-			continue
-		}
+		var resp string
+		
+		// Tool call chaining loop
+		for {
+			var thinking string
+			var toolCalls []ToolCall
+			var err error
+			resp, thinking, toolCalls, err = sendRequest(client, apiKey, messages, true, func(chunk string) {
+				outputBuffer.WriteString(chunk)
+				fmt.Print(chunk)
+				lineCount += strings.Count(chunk, "\n")
+			}, func(thinkingChunk string) {
+				thinkingBuffer.WriteString(thinkingChunk)
+				fmt.Print(Dim + thinkingChunk + Reset)
+			})
+			if err != nil {
+				fmt.Printf(Red+"\nError: %v"+Reset+"\n\n", err)
+				messages = messages[:len(messages)-1]
+				break
+			}
+			_ = thinking
 
-		if toolCall != nil {
-			arguments := toolCall.RawArgs
-			if arguments == "" {
-				argsMap := map[string]string{}
-				if len(toolCall.Args) > 0 {
-					argsMap["path"] = toolCall.Args[0]
+			// If no tool calls, we're done
+			if len(toolCalls) == 0 {
+				// Display thinking text
+				thinkingStr := thinkingBuffer.String()
+				if thinkingStr != "" {
+					fmt.Println()
+					fmt.Println(Dim + "💭 Thinking: " + thinkingStr + Reset)
 				}
-				argsBytes, _ := json.Marshal(argsMap)
-				arguments = string(argsBytes)
+				break
+			}
+
+			// Print accumulated thinking with dimmed color
+			thinkingStr := thinkingBuffer.String()
+			if thinkingStr != "" {
+				fmt.Println()
+				fmt.Println(Dim + "💭 Thinking: " + thinkingStr + Reset)
+			}
+
+			// Print all tool call details with dimmed color
+			fmt.Println()
+			fmt.Printf(Dim+"🔧 Tool Calls (%d):"+Reset+"\n", len(toolCalls))
+			
+			var toolCallInfos []ToolCallInfo
+			for i, tc := range toolCalls {
+				fmt.Printf(Dim+"  [%d] Name: %s"+Reset+"\n", i+1, tc.Name)
+				fmt.Printf(Dim+"      Arguments: %s"+Reset+"\n", tc.RawArgs)
+				
+				arguments := tc.RawArgs
+				if arguments == "" {
+					argsMap := map[string]string{}
+					if len(tc.Args) > 0 {
+						argsMap["path"] = tc.Args[0]
+					}
+					argsBytes, _ := json.Marshal(argsMap)
+					arguments = string(argsBytes)
+				}
+				toolCallInfos = append(toolCallInfos, ToolCallInfo{
+					ID:       fmt.Sprintf("call_%d", i+1),
+					Type:     "function",
+					Function: FC{Name: tc.Name, Arguments: arguments},
+				})
 			}
 
 			messages = append(messages, Message{
 				Role:      "assistant",
-				Content:   " ",
-				ToolCalls: []ToolCallInfo{{ID: "call_1", Type: "function", Function: FC{Name: toolCall.Name, Arguments: arguments}}},
+				Content:   resp,
+				ToolCalls: toolCallInfos,
 			})
 
-			fmt.Print(Green + "\nExecuting: " + Reset + toolCall.Name + "\n")
-			result, err := ExecuteTool(toolCall.Name, toolCall.Args)
-			if err != nil {
-				messages = append(messages, Message{Role: "tool", ToolCallID: "call_1", Content: fmt.Sprintf("Error: %v", err)})
-			} else {
-				messages = append(messages, Message{Role: "tool", ToolCallID: "call_1", Content: result})
+			// Execute ALL tool calls
+			for i, tc := range toolCalls {
+				fmt.Printf(Green+"\n▶ Executing [%d/%d]: %s"+Reset+"\n", i+1, len(toolCalls), tc.Name)
+				result, err := ExecuteTool(tc.Name, tc.Args)
+				if err != nil {
+					messages = append(messages, Message{Role: "tool", ToolCallID: fmt.Sprintf("call_%d", i+1), Content: fmt.Sprintf("Error: %v", err)})
+				} else {
+					messages = append(messages, Message{Role: "tool", ToolCallID: fmt.Sprintf("call_%d", i+1), Content: result})
+				}
 			}
 
-			// Get final response
+			// Reset for next iteration (chaining)
 			fmt.Print(Red + "\nApollo: " + Reset)
 			outputBuffer.Reset()
+			thinkingBuffer.Reset()
 			lineCount = 0
-			resp, _, err = sendRequest(client, apiKey, messages, true, func(chunk string) {
-				outputBuffer.WriteString(chunk)
-				fmt.Print(chunk)
-				lineCount += strings.Count(chunk, "\n")
-			})
-			if err != nil {
-				fmt.Printf(Red+"\nError: %v"+Reset+"\n\n", err)
-				continue
-			}
 		}
 
 		messages = append(messages, Message{Role: "assistant", Content: resp})
@@ -189,6 +238,7 @@ func main() {
 type Message struct {
 	Role       string         `json:"role"`
 	Content    string         `json:"content,omitempty"`
+	Thinking   string         `json:"thinking,omitempty"`
 	Name       string         `json:"name,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 	ToolCalls  []ToolCallInfo `json:"tool_calls,omitempty"`
@@ -249,6 +299,7 @@ type Choice struct {
 	Message struct {
 		Role      string         `json:"role"`
 		Content   string         `json:"content"`
+		Thinking  string         `json:"thinking,omitempty"`
 		ToolCalls []ToolCallInfo `json:"tool_calls,omitempty"`
 	} `json:"message"`
 	FinishReason string `json:"finish_reason"`
@@ -259,7 +310,7 @@ type Response struct {
 	Choices []Choice `json:"choices"`
 }
 
-func sendRequest(client *http.Client, apiKey string, messages []Message, stream bool, onChunk func(string)) (string, *ToolCall, error) {
+func sendRequest(client *http.Client, apiKey string, messages []Message, stream bool, onChunk func(string), onThinking func(string)) (string, string, []ToolCall, error) {
 	lsTool := ToolDef{
 		Type: "function",
 		Function: struct {
@@ -320,7 +371,7 @@ func sendRequest(client *http.Client, apiKey string, messages []Message, stream 
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
 	if debugMode {
@@ -330,32 +381,33 @@ func sendRequest(client *http.Client, apiKey string, messages []Message, stream 
 	req, err := http.NewRequestWithContext(context.Background(), "POST",
 		"https://opencode.ai/zen/go/v1/chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	if stream {
-		return handleStreamingResponse(client, req, onChunk)
+		return handleStreamingResponse(client, req, onChunk, onThinking)
 	}
 
 	return handleNonStreamingResponse(client, req)
 }
 
-func handleStreamingResponse(client *http.Client, req *http.Request, onChunk func(string)) (string, *ToolCall, error) {
+func handleStreamingResponse(client *http.Client, req *http.Request, onChunk func(string), onThinking func(string)) (string, string, []ToolCall, error) {
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+		return "", "", nil, fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
 
 	var fullContent strings.Builder
-	var toolCall *ToolCall
+	var fullThinking strings.Builder
+	var toolCalls []ToolCall
 	var accumulatedToolCalls []ToolCallInfo
 
 	scanner := bufio.NewScanner(resp.Body)
@@ -382,6 +434,14 @@ func handleStreamingResponse(client *http.Client, req *http.Request, onChunk fun
 		choice := streamResp.Choices[0]
 		delta := choice.Delta
 
+		// Accumulate thinking
+		if delta.Thinking != "" {
+			fullThinking.WriteString(delta.Thinking)
+			if onThinking != nil {
+				onThinking(delta.Thinking)
+			}
+		}
+
 		// Accumulate content
 		if delta.Content != "" {
 			fullContent.WriteString(delta.Content)
@@ -404,53 +464,54 @@ func handleStreamingResponse(client *http.Client, req *http.Request, onChunk fun
 		// Check for finish
 		if choice.FinishReason != nil {
 			if *choice.FinishReason == "tool_calls" && len(accumulatedToolCalls) > 0 {
-				tc := accumulatedToolCalls[0]
-				toolCall = &ToolCall{
-					Name:    tc.Function.Name,
-					Args:    parseToolArgs(tc.Function.Arguments),
-					RawArgs: tc.Function.Arguments,
+				// Convert all accumulated tool calls
+				for _, tc := range accumulatedToolCalls {
+					toolCalls = append(toolCalls, ToolCall{
+						Name:    tc.Function.Name,
+						Args:    parseToolArgs(tc.Function.Arguments),
+						RawArgs: tc.Function.Arguments,
+					})
 				}
 			}
 			break
 		}
 	}
 
-	return fullContent.String(), toolCall, scanner.Err()
+	return fullContent.String(), fullThinking.String(), toolCalls, scanner.Err()
 }
 
-func handleNonStreamingResponse(client *http.Client, req *http.Request) (string, *ToolCall, error) {
+func handleNonStreamingResponse(client *http.Client, req *http.Request) (string, string, []ToolCall, error) {
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+		return "", "", nil, fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
 
 	var chatResp Response
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return "", nil, err
+		return "", "", nil, err
 	}
 
 	if len(chatResp.Choices) == 0 {
-		return "", nil, fmt.Errorf("no response from API")
+		return "", "", nil, fmt.Errorf("no response from API")
 	}
 
 	msg := chatResp.Choices[0].Message
 
-	var toolCall *ToolCall
-	if len(msg.ToolCalls) > 0 {
-		tc := msg.ToolCalls[0]
-		toolCall = &ToolCall{
+	var toolCalls []ToolCall
+	for _, tc := range msg.ToolCalls {
+		toolCalls = append(toolCalls, ToolCall{
 			Name:    tc.Function.Name,
 			Args:    parseToolArgs(tc.Function.Arguments),
 			RawArgs: tc.Function.Arguments,
-		}
+		})
 	}
 
-	return msg.Content, toolCall, nil
+	return msg.Content, msg.Thinking, toolCalls, nil
 }
 
 // parseToolArgs extracts arguments from JSON string
