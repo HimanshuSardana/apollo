@@ -81,6 +81,15 @@ func executeBash(args []string) (string, error) {
 		return "", fmt.Errorf("usage: bash <command>")
 	}
 	command := strings.Join(args, " ")
+	// if command starts with "rm", pause for confirmation
+	if strings.HasPrefix(command, "rm") {
+		fmt.Printf("Are you sure you want to execute '%s'? (y/N): ", command)
+		var response string
+		fmt.Scanln(&response)
+		if strings.ToLower(response) != "y" {
+			return "", fmt.Errorf("command execution cancelled")
+		}
+	}
 	cmd := exec.Command("bash", "-c", command)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -104,4 +113,3 @@ func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
-
