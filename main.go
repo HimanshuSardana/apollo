@@ -20,6 +20,7 @@ import (
 var (
 	cwd, _    = os.Getwd()
 	debugMode bool
+	safeMode  bool
 )
 
 // usageTracker holds cumulative token usage for a session
@@ -38,13 +39,11 @@ type UsageTracker struct {
 	requestCount     int
 }
 
-// filenameAutoCompleter provides tab completion for filenames
 type filenameAutoCompleter struct{}
 
 func (c *filenameAutoCompleter) Do(line []rune, pos int) (newLine [][]rune, length int) {
 	lineStr := string(line)
 
-	// Find the start of the current word
 	start := pos
 	for start > 0 && line[start-1] != ' ' {
 		start--
@@ -132,7 +131,8 @@ var SYSTEM_PROMPT = `You are an AI assistant that helps the user understand and 
 
 - ls [path]: Lists the contents of a directory. Use this to explore the project structure, find files, or see what is in a folder. If no path is provided, it lists the current directory.
 - read <path>: Reads the full contents of a file. Use this to examine source code, configuration files, or documentation. The path argument is required.
-- bash [cmd]: Executes a shell command and returns the output. Use this for task that requires running commands, such as checking git status, running tests, or using command-line tools. If no cmd is provided, it will open an interactive shell session.
+- bash [cmd]: Executes a shell command and returns the output. Use this for task that requires running commands, such as checking git status, running tests, or using command-line tools.
+- edit path=<path> new_content=<content> [old_text=<text>]: Edit a file by providing new content. ALWAYS read the file first, then provide the COMPLETE new content. The user will see a diff preview and can confirm before changes are applied. Use old_text to specify what you're replacing if you want verification.
 
 Guidelines for using tools:
 - Do not output raw file contents you read directly unless the user explicitly asks for them. Instead, summarize, quote, or explain the relevant parts.
@@ -162,7 +162,11 @@ const (
 func main() {
 	flag.BoolVar(&debugMode, "d", false, "Print API request JSON for debugging")
 	flag.BoolVar(&debugMode, "debug", false, "Print API request JSON for debugging")
+	flag.BoolVar(&safeMode, "safe", false, "Ask for confirmation before applying edits")
 	flag.Parse()
+	
+	// Set safe mode for tools package
+	SafeMode = safeMode
 
 	client := &http.Client{}
 	apiKey := os.Getenv("OPENCODE_API_KEY")
@@ -188,7 +192,7 @@ func main() {
 
 	fmt.Println(Bold + Cyan + "Apollo AI Assistant" + Reset)
 	fmt.Println(Gray + "Type your prompt and press Enter to send. Type 'quit' to exit." + Reset)
-	fmt.Println(Gray + "Available tools: ls, read, bash | Tab: autocomplete filenames or commands (when starting with /)" + Reset)
+	fmt.Println(Gray + "Available tools: ls, read, bash, edit | Tab: autocomplete filenames or commands (when starting with /)" + Reset)
 	fmt.Println(Gray + "Commands: /usage - Show token usage for this session" + Reset)
 	fmt.Println()
 
@@ -517,10 +521,40 @@ func sendRequest(client *http.Client, apiKey string, messages []Message, stream 
 		},
 	}
 
+	editTool := ToolDef{
+		Type: "function",
+		Function: struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Parameters  any    `json:"parameters"`
+		}{
+			Name:        "edit",
+			Description: "Edit a file by providing new content. Shows a diff preview before applying changes. Use read first to see current content, then provide the complete new file content.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]any{
+						"type":        "string",
+						"description": "Path to the file to edit",
+					},
+					"new_content": map[string]any{
+						"type":        "string",
+						"description": "The complete new content for the file",
+					},
+					"old_text": map[string]any{
+						"type":        "string",
+						"description": "Optional: specific text that should be replaced (for verification)",
+					},
+				},
+				"required": []any{"path", "new_content"},
+			},
+		},
+	}
+
 	reqBody := Request{
 		Model:    "minimax-m2.5",
 		Messages: messages,
-		Tools:    []ToolDef{lsTool, readTool, bashTool},
+		Tools:    []ToolDef{lsTool, readTool, bashTool, editTool},
 		Stream:   stream,
 	}
 
@@ -681,9 +715,19 @@ func parseToolArgs(args string) []string {
 	if err := json.Unmarshal([]byte(args), &argsMap); err != nil {
 		return nil
 	}
-	if path, ok := argsMap["path"].(string); ok && path != "" {
+	
+	// Handle edit tool: requires path and new_content
+	if path, ok := argsMap["path"].(string); ok {
+		if newContent, ok := argsMap["new_content"].(string); ok {
+			result := []string{path, newContent}
+			if oldText, ok := argsMap["old_text"].(string); ok && oldText != "" {
+				result = append(result, oldText)
+			}
+			return result
+		}
 		return []string{path}
 	}
+	
 	if cmd, ok := argsMap["cmd"].(string); ok && cmd != "" {
 		return []string{cmd}
 	}

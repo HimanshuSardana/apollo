@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// SafeMode controls whether to ask for confirmation before edits
+var SafeMode bool
+
 // ExecTool represents an executable shell tool
 type ExecTool struct {
 	Name        string
@@ -36,6 +39,11 @@ func NewCmdTools() *CmdTools {
 				Name:        "bash",
 				Description: "Execute a shell command",
 				Execute:     executeBash,
+			},
+			"edit": {
+				Name:        "edit",
+				Description: "Edit a file by showing diff and applying changes",
+				Execute:     executeEdit,
 			},
 		},
 	}
@@ -114,23 +122,23 @@ func executeRead(args []string) (string, error) {
 
 // dangerousCommands is a list of commands that are blocked entirely
 var dangerousCommands = []string{
-	"rm", "rmdir", "del", "erase",    // File deletion
-	"mkfs", "mkfs.ext", "mkfs.xfs",   // Filesystem creation (destructive)
-	"dd",                                  // Low-level disk operations
-	"wipe", "shred", "secure-delete",    // Secure deletion
-	"fdisk", "parted", "gparted",         // Disk partitioning
-	"mount", "umount", "mount.",          // Filesystem mounting
+	"rm", "rmdir", "del", "erase", // File deletion
+	"mkfs", "mkfs.ext", "mkfs.xfs", // Filesystem creation (destructive)
+	"dd",                             // Low-level disk operations
+	"wipe", "shred", "secure-delete", // Secure deletion
+	"fdisk", "parted", "gparted", // Disk partitioning
+	"mount", "umount", "mount.", // Filesystem mounting
 	"curl", "wget", "fetch", "rpm", "apt-get", "apt", "yum", "dpkg", // Download/install
 	"pip", "npm", "gem", "cargo", "go install", // Package managers
 	"python", "python3", "perl", "ruby", "node", "php", "bash", "sh", "zsh", // Interpreters
-	"chmod", "chown", "chgrp",               // Permission changes
-	"chmod +x", "chmod 777",                 // Dangerous permission escalations
-	"sudo", "su", "doas",                    // Privilege escalation
-	"ssh", "scp", "sftp", "nc", "netcat",    // Network operations
-	"fork",                                  // Process forking
-	"> /dev/sd", "> /dev/null",              // Dangerous redirections
-	"eval", "exec", "source",                 // Shell built-ins
-	"alias", "export", "env",                 // Environment manipulation
+	"chmod", "chown", "chgrp", // Permission changes
+	"chmod +x", "chmod 777", // Dangerous permission escalations
+	"sudo", "su", "doas", // Privilege escalation
+	"ssh", "scp", "sftp", "nc", "netcat", // Network operations
+	"fork",                     // Process forking
+	"> /dev/sd", "> /dev/null", // Dangerous redirections
+	"eval", "exec", "source", // Shell built-ins
+	"alias", "export", "env", // Environment manipulation
 }
 
 // dangerousPatterns are patterns that indicate dangerous operations
@@ -141,13 +149,13 @@ var dangerousPatterns = []string{
 	"&& rm", "|| rm",
 	"> /", ">> /",
 	"2> /",
-	"$(", "`",                          // Command substitution
+	"$(", "`", // Command substitution
 	"$(",
-	"> $HOME", "> ~/.",                 // Overwriting home
-	"wget http", "curl http",           // Downloading scripts
-	"chmod 777", "chmod +x",            // Dangerous permissions
-	"sudo -", "su -",                   // Privilege escalation
-	"curl -o", "wget -O",               // Download to file
+	"> $HOME", "> ~/.", // Overwriting home
+	"wget http", "curl http", // Downloading scripts
+	"chmod 777", "chmod +x", // Dangerous permissions
+	"sudo -", "su -", // Privilege escalation
+	"curl -o", "wget -O", // Download to file
 }
 
 // sensitivePaths are paths that should never be accessed
@@ -212,9 +220,9 @@ func executeBash(args []string) (string, error) {
 	requiresConfirmation := []string{
 		"rm -rf", "rm -r", "rm -f", "rmdir",
 		"del ", "erase ",
-		"mv ", "move ",    // Moving can overwrite
-		"cp ", "copy ",    // Copy could fill disk
-		"> ", ">> ",       // Redirection
+		"mv ", "move ", // Moving can overwrite
+		"cp ", "copy ", // Copy could fill disk
+		"> ", ">> ", // Redirection
 	}
 
 	needsConfirmation := false
@@ -271,4 +279,131 @@ func ExecuteTool(name string, args []string) (string, error) {
 func FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// generateUnifiedDiff creates a unified diff using the diff command
+func generateUnifiedDiff(path string, oldContent, newContent string) (string, error) {
+	// Create temp files for diff
+	oldFile, err := os.CreateTemp("", "apollo_edit_old_*")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(oldFile.Name())
+	oldFile.WriteString(oldContent)
+	oldFile.Close()
+
+	newFile, err := os.CreateTemp("", "apollo_edit_new_*")
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(newFile.Name())
+	newFile.WriteString(newContent)
+	newFile.Close()
+
+	// Run diff -u for unified format
+	cmd := exec.Command("diff", "-u", oldFile.Name(), newFile.Name())
+	output, _ := cmd.CombinedOutput()
+
+	// diff returns exit 1 when files differ, which is expected
+	result := string(output)
+
+	// Replace temp filenames with actual path
+	result = strings.ReplaceAll(result, oldFile.Name(), path)
+	result = strings.ReplaceAll(result, newFile.Name(), path)
+
+	return result, nil
+}
+
+// colorizeDiff adds ANSI colors to diff output
+func colorizeDiff(diff string) string {
+	lines := strings.Split(diff, "\n")
+	var colored strings.Builder
+
+	for _, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "---"):
+			colored.WriteString("\033[31m" + line + "\033[0m\n") // Red for old file
+		case strings.HasPrefix(line, "+++"):
+			colored.WriteString("\033[32m" + line + "\033[0m\n") // Green for new file
+		case strings.HasPrefix(line, "@@"):
+			colored.WriteString("\033[36m" + line + "\033[0m\n") // Cyan for hunk headers
+		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
+			colored.WriteString("\033[31m" + line + "\033[0m\n") // Red for removed lines
+		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
+			colored.WriteString("\033[32m" + line + "\033[0m\n") // Green for added lines
+		default:
+			colored.WriteString(line + "\n")
+		}
+	}
+
+	return colored.String()
+}
+
+// executeEdit edits a file by showing a diff and applying changes
+func executeEdit(args []string) (string, error) {
+	if len(args) < 2 {
+		return "", fmt.Errorf("usage: edit <path> <new_content> [old_text]")
+	}
+	path := args[0]
+	newContent := args[1]
+
+	// Optional: old text to verify before replacement
+	var oldText string
+	if len(args) >= 3 {
+		oldText = args[2]
+	}
+
+	// Validate path
+	if strings.Contains(path, "..") {
+		return "", fmt.Errorf("path traversal not allowed")
+	}
+
+	// Read existing file
+	var oldContent string
+	if FileExists(path) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("cannot read %s: %w", path, err)
+		}
+		oldContent = string(data)
+	}
+
+	// If old_text specified, verify it exists in file
+	if oldText != "" && !strings.Contains(oldContent, oldText) {
+		return "", fmt.Errorf("old_text not found in file - file may have changed")
+	}
+
+	// Generate unified diff using diff command
+	diffOutput, err := generateUnifiedDiff(path, oldContent, newContent)
+	if err != nil {
+		// Fallback to simple display if diff command fails
+		diffOutput = fmt.Sprintf("--- %s\n+++ %s (modified)\n@@ -0,0 +0,0 @@", path, path)
+	}
+
+	// Show diff with colors
+	fmt.Println("\n" + strings.Repeat("=", 70))
+	fmt.Println("Proposed changes to: " + path)
+	fmt.Println(colorizeDiff(diffOutput))
+
+	// In safe mode, ask for confirmation
+	if SafeMode {
+		fmt.Printf("\nApply these changes? (y/n): ")
+		var response string
+		fmt.Scanln(&response)
+
+		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+			return "Changes cancelled", nil
+		}
+	}
+
+	// Apply the changes
+	err = os.WriteFile(path, []byte(newContent), 0o644)
+	if err != nil {
+		return "", fmt.Errorf("failed to write file: %w", err)
+	}
+
+	if SafeMode {
+		return fmt.Sprintf("✓ File %s updated successfully", path), nil
+	}
+	return fmt.Sprintf("✓ File %s updated (use --safe to review changes)", path), nil
 }
