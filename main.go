@@ -5,13 +5,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/charmbracelet/glamour"
 )
 
-var cwd, _ = os.Getwd()
+var (
+	cwd, _    = os.Getwd()
+	debugMode bool
+)
 
 var SYSTEM_PROMPT = `You are an AI assistant that helps the user understand and navigate the codebase in the current working directory. You have access to the following tools:
 
@@ -50,10 +56,20 @@ const (
 )
 
 func main() {
+	flag.BoolVar(&debugMode, "d", false, "Print API request JSON for debugging")
+	flag.BoolVar(&debugMode, "debug", false, "Print API request JSON for debugging")
+	flag.Parse()
+
 	client := &http.Client{}
 	apiKey := os.Getenv("OPENCODE_API_KEY")
 	if apiKey == "" {
 		fmt.Fprintln(os.Stderr, "Error: OPENCODE_API_KEY not set")
+		os.Exit(1)
+	}
+
+	renderer, err := glamour.NewTermRenderer(glamour.WithAutoStyle())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error: failed to create markdown renderer:", err)
 		os.Exit(1)
 	}
 
@@ -140,7 +156,12 @@ func main() {
 		}
 
 		messages = append(messages, Message{Role: "assistant", Content: resp})
-		fmt.Printf(Red+"Apollo: "+Reset+"%s"+"\n\n", resp)
+
+		rendered, err := renderer.Render(resp)
+		if err != nil {
+			rendered = resp
+		}
+		fmt.Printf(Red+"Apollo: "+Reset+"%s"+"\n", rendered)
 	}
 }
 
@@ -267,7 +288,9 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 		return "", nil, err
 	}
 
-	fmt.Println(Dim + "Request: " + string(jsonBody) + Reset)
+	if debugMode {
+		fmt.Println(Dim + "Request: " + string(jsonBody) + Reset)
+	}
 
 	req, err := http.NewRequestWithContext(context.Background(), "POST",
 		"https://opencode.ai/zen/go/v1/chat/completions", bytes.NewBuffer(jsonBody))
