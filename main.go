@@ -115,9 +115,11 @@ func main() {
 		fmt.Print(Red + "Apollo: " + Reset)
 
 		var outputBuffer strings.Builder
+		var lineCount int
 		resp, toolCall, err := sendRequest(client, apiKey, messages, true, func(chunk string) {
 			outputBuffer.WriteString(chunk)
 			fmt.Print(chunk)
+			lineCount += strings.Count(chunk, "\n")
 		})
 		if err != nil {
 			fmt.Printf(Red+"\nError: %v"+Reset+"\n\n", err)
@@ -153,9 +155,11 @@ func main() {
 			// Get final response
 			fmt.Print(Red + "\nApollo: " + Reset)
 			outputBuffer.Reset()
+			lineCount = 0
 			resp, _, err = sendRequest(client, apiKey, messages, true, func(chunk string) {
 				outputBuffer.WriteString(chunk)
 				fmt.Print(chunk)
+				lineCount += strings.Count(chunk, "\n")
 			})
 			if err != nil {
 				fmt.Printf(Red+"\nError: %v"+Reset+"\n\n", err)
@@ -165,8 +169,14 @@ func main() {
 
 		messages = append(messages, Message{Role: "assistant", Content: resp})
 
-		// Clear the streaming line and re-render with glamour for final output
-		fmt.Print("\r\033[K") // Clear to end of line
+		// Clear all streamed lines and re-render with glamour
+		// Move cursor to beginning of "Apollo:" line, then clear everything below
+		fmt.Print("\r") // Go to start of current line
+		for i := 0; i < lineCount; i++ {
+			fmt.Print("\033[A") // Move up one line
+		}
+		fmt.Print("\033[J") // Clear from cursor to end of screen
+
 		rendered, renderErr := renderer.Render(outputBuffer.String())
 		if renderErr != nil {
 			rendered = outputBuffer.String()
