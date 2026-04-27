@@ -22,6 +22,22 @@ var (
 	debugMode bool
 )
 
+// usageTracker holds cumulative token usage for a session
+var usageTracker = UsageTracker{
+	promptTokens:     0,
+	completionTokens: 0,
+	totalTokens:      0,
+	requestCount:     0,
+}
+
+// UsageTracker stores token usage statistics
+type UsageTracker struct {
+	promptTokens     int
+	completionTokens int
+	totalTokens      int
+	requestCount     int
+}
+
 // filenameAutoCompleter provides tab completion for filenames
 type filenameAutoCompleter struct{}
 
@@ -68,18 +84,61 @@ func (c *filenameAutoCompleter) Do(line []rune, pos int) (newLine [][]rune, leng
 	return newLine, 0
 }
 
+// commandAutoCompleter provides tab completion for / commands
+type commandAutoCompleter struct{}
+
+var availableCommands = []string{
+	"usage",
+	"clear",
+	"help",
+}
+
+func (c *commandAutoCompleter) Do(line []rune, pos int) (newLine [][]rune, length int) {
+	lineStr := string(line)
+
+	// Only complete if line starts with /
+	if !strings.HasPrefix(lineStr, "/") {
+		return nil, 0
+	}
+
+	// Find the start of the current word (after the /)
+	start := 1 // skip the leading /
+	for start < pos && line[start] == ' ' {
+		start++
+	}
+
+	// Get the current command word (without the /)
+	var searchStart int
+	if start > 1 {
+		searchStart = start
+	}
+	prefixEnd := searchStart
+	for prefixEnd < pos && line[prefixEnd] != ' ' {
+		prefixEnd++
+	}
+
+	prefix := lineStr[searchStart:prefixEnd]
+
+	// Find matching commands
+	for _, cmd := range availableCommands {
+		if !strings.HasPrefix(cmd, prefix) {
+			continue
+		}
+
+		suffix := cmd[len(prefix):]
+		newLine = append(newLine, []rune(suffix+" "))
+	}
+
+	return newLine, 0
+}
+
 var SYSTEM_PROMPT = `You are an AI assistant that helps the user understand and navigate the codebase in the current working directory. You have access to the following tools:
 
 - ls [path]: Lists the contents of a directory. Use this to explore the project structure, find files, or see what is in a folder. If no path is provided, it lists the current directory.
 - read <path>: Reads the full contents of a file. Use this to examine source code, configuration files, or documentation. The path argument is required.
-- bash [cmd]: Executes a shell command and returns the output. Use this for tasks that require running commands, such as checking git status, running tests, or using command-line tools. If no cmd is provided, it will open an interactive shell session.
+- bash [cmd]: Executes a shell command and returns the output. Use this for task that requires running commands, such as checking git status, running tests, or using command-line tools. If no cmd is provided, it will open an interactive shell session.
 
 Guidelines for using tools:
-- Use ls when you need to explore the file system, discover files, or verify a directory's contents before reading.
-- Use read when the user asks about specific code, logic, or documentation, and you need to see the file contents to answer accurately.
-- You may chain tool calls: list a directory first to find relevant files, then read the ones you need.
-
-Response guidelines:
 - Do not output raw file contents you read directly unless the user explicitly asks for them. Instead, summarize, quote, or explain the relevant parts.
 - Do not use markdown tables in your responses.
 - Keep your responses concise and relevant to the user's request.
@@ -133,14 +192,15 @@ func main() {
 
 	fmt.Println(Bold + Cyan + "Apollo AI Assistant" + Reset)
 	fmt.Println(Gray + "Type your prompt and press Enter to send. Type 'quit' to exit." + Reset)
-	fmt.Println(Gray + "Available tools: ls, read, bash | Tab: autocomplete filenames" + Reset)
+	fmt.Println(Gray + "Available tools: ls, read, bash | Tab: autocomplete filenames or commands (when starting with /)" + Reset)
+	fmt.Println(Gray + "Commands: /usage - Show token usage for this session" + Reset)
 	fmt.Println()
 
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          Cyan + "You: " + Reset,
 		InterruptPrompt: "^C",
 		EOFPrompt:       "quit",
-		AutoComplete:    &filenameAutoCompleter{},
+		AutoComplete:    &combinedCompleter{},
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error creating readline:", err)
@@ -169,6 +229,13 @@ func main() {
 		if strings.HasPrefix(prompt, "/") {
 			parts := strings.Fields(prompt[1:])
 			if len(parts) > 0 {
+				// Handle /usage command
+				if parts[0] == "usage" {
+					fmt.Println()
+					printUsage()
+					fmt.Println()
+					continue
+				}
 				result, err := ExecuteTool(parts[0], parts[1:])
 				if err != nil {
 					fmt.Printf(Red+"Error: %v"+Reset+"\n\n", err)
@@ -192,8 +259,9 @@ func main() {
 		for {
 			var thinking string
 			var toolCalls []ToolCall
+			var currentUsage *Usage
 			var err error
-			resp, thinking, toolCalls, err = sendRequest(client, apiKey, messages, true, func(chunk string) {
+			resp, thinking, toolCalls, currentUsage, err = sendRequest(client, apiKey, messages, true, func(chunk string) {
 				outputBuffer.WriteString(chunk)
 				fmt.Print(chunk)
 				lineCount += strings.Count(chunk, "\n")
@@ -206,6 +274,15 @@ func main() {
 				messages = messages[:len(messages)-1]
 				break
 			}
+
+			// Update usage tracker
+			if currentUsage != nil {
+				usageTracker.promptTokens += currentUsage.PromptTokens
+				usageTracker.completionTokens += currentUsage.CompletionTokens
+				usageTracker.totalTokens += currentUsage.TotalTokens
+				usageTracker.requestCount++
+			}
+
 			_ = thinking
 
 			// If no tool calls, we're done
@@ -293,6 +370,20 @@ func main() {
 	}
 }
 
+// printUsage displays the current token usage statistics
+func printUsage() {
+	if usageTracker.requestCount == 0 {
+		fmt.Println(Yellow + "No API requests made yet in this session." + Reset)
+		return
+	}
+
+	fmt.Println(Bold + "Token Usage (Session)" + Reset)
+	fmt.Printf("  %sRequests:%s     %d\n", Cyan, Reset, usageTracker.requestCount)
+	fmt.Printf("  %sPrompt Tokens:%s    %s%d%s\n", Cyan, Reset, Green, usageTracker.promptTokens, Reset)
+	fmt.Printf("  %sCompletion Tokens:%s %s%d%s\n", Cyan, Reset, Green, usageTracker.completionTokens, Reset)
+	fmt.Printf("  %sTotal Tokens:%s     %s%d%s\n", Cyan, Reset, Green, usageTracker.totalTokens, Reset)
+}
+
 // Message represents a chat message
 type Message struct {
 	Role       string         `json:"role"`
@@ -323,6 +414,13 @@ type ToolCall struct {
 	RawArgs string
 }
 
+// Usage holds token usage information from API response
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // Request structure for API
 type Request struct {
 	Model    string    `json:"model"`
@@ -341,6 +439,7 @@ type StreamChoice struct {
 // StreamResponse is a single SSE chunk
 type StreamResponse struct {
 	Choices []StreamChoice `json:"choices"`
+	Usage   *Usage         `json:"usage,omitempty"`
 }
 
 // ToolDef is a tool definition for the API
@@ -367,9 +466,10 @@ type Choice struct {
 // Response from API
 type Response struct {
 	Choices []Choice `json:"choices"`
+	Usage   *Usage   `json:"usage,omitempty"`
 }
 
-func sendRequest(client *http.Client, apiKey string, messages []Message, stream bool, onChunk func(string), onThinking func(string)) (string, string, []ToolCall, error) {
+func sendRequest(client *http.Client, apiKey string, messages []Message, stream bool, onChunk func(string), onThinking func(string)) (string, string, []ToolCall, *Usage, error) {
 	lsTool := ToolDef{
 		Type: "function",
 		Function: struct {
@@ -430,7 +530,7 @@ func sendRequest(client *http.Client, apiKey string, messages []Message, stream 
 
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
 
 	if debugMode {
@@ -440,7 +540,7 @@ func sendRequest(client *http.Client, apiKey string, messages []Message, stream 
 	req, err := http.NewRequestWithContext(context.Background(), "POST",
 		"https://opencode.ai/zen/go/v1/chat/completions", bytes.NewBuffer(jsonBody))
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -453,21 +553,22 @@ func sendRequest(client *http.Client, apiKey string, messages []Message, stream 
 	return handleNonStreamingResponse(client, req)
 }
 
-func handleStreamingResponse(client *http.Client, req *http.Request, onChunk func(string), onThinking func(string)) (string, string, []ToolCall, error) {
+func handleStreamingResponse(client *http.Client, req *http.Request, onChunk func(string), onThinking func(string)) (string, string, []ToolCall, *Usage, error) {
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", "", nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+		return "", "", nil, nil, fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
 
 	var fullContent strings.Builder
 	var fullThinking strings.Builder
 	var toolCalls []ToolCall
 	var accumulatedToolCalls []ToolCallInfo
+	var lastUsage *Usage
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
@@ -484,6 +585,11 @@ func handleStreamingResponse(client *http.Client, req *http.Request, onChunk fun
 		var streamResp StreamResponse
 		if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
 			continue
+		}
+
+		// Capture usage from stream chunks
+		if streamResp.Usage != nil {
+			lastUsage = streamResp.Usage
 		}
 
 		if len(streamResp.Choices) == 0 {
@@ -536,27 +642,27 @@ func handleStreamingResponse(client *http.Client, req *http.Request, onChunk fun
 		}
 	}
 
-	return fullContent.String(), fullThinking.String(), toolCalls, scanner.Err()
+	return fullContent.String(), fullThinking.String(), toolCalls, lastUsage, scanner.Err()
 }
 
-func handleNonStreamingResponse(client *http.Client, req *http.Request) (string, string, []ToolCall, error) {
+func handleNonStreamingResponse(client *http.Client, req *http.Request) (string, string, []ToolCall, *Usage, error) {
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", "", nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+		return "", "", nil, nil, fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
 
 	var chatResp Response
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return "", "", nil, err
+		return "", "", nil, nil, err
 	}
 
 	if len(chatResp.Choices) == 0 {
-		return "", "", nil, fmt.Errorf("no response from API")
+		return "", "", nil, nil, fmt.Errorf("no response from API")
 	}
 
 	msg := chatResp.Choices[0].Message
@@ -570,7 +676,7 @@ func handleNonStreamingResponse(client *http.Client, req *http.Request) (string,
 		})
 	}
 
-	return msg.Content, msg.Thinking, toolCalls, nil
+	return msg.Content, msg.Thinking, toolCalls, chatResp.Usage, nil
 }
 
 // parseToolArgs extracts arguments from JSON string
@@ -586,4 +692,19 @@ func parseToolArgs(args string) []string {
 		return []string{cmd}
 	}
 	return nil
+}
+
+// combinedCompleter switches between command and filename completion
+type combinedCompleter struct{}
+
+func (c *combinedCompleter) Do(line []rune, pos int) (newLine [][]rune, length int) {
+	lineStr := string(line)
+
+	// If line starts with /, use command completer
+	if strings.HasPrefix(lineStr, "/") {
+		return (&commandAutoCompleter{}).Do(line, pos)
+	}
+
+	// Otherwise use filename completer
+	return (&filenameAutoCompleter{}).Do(line, pos)
 }
