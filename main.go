@@ -11,12 +11,31 @@ import (
 	"strings"
 )
 
-// ANSI color codes
+var cwd, _ = os.Getwd()
+
+var SYSTEM_PROMPT = `You are an AI assistant that helps the user understand and navigate the codebase in the current working directory. You have access to the following tools:
+
+- ls [path]: Lists the contents of a directory. Use this to explore the project structure, find files, or see what is in a folder. If no path is provided, it lists the current directory.
+- read <path>: Reads the full contents of a file. Use this to examine source code, configuration files, or documentation. The path argument is required.
+
+Guidelines for using tools:
+- Use ls when you need to explore the file system, discover files, or verify a directory's contents before reading.
+- Use read when the user asks about specific code, logic, or documentation, and you need to see the file contents to answer accurately.
+- You may chain tool calls: list a directory first to find relevant files, then read the ones you need.
+
+Response guidelines:
+- Do not output raw file contents you read directly unless the user explicitly asks for them. Instead, summarize, quote, or explain the relevant parts.
+- Do not use markdown tables in your responses.
+- Keep your responses concise and relevant to the user's request.
+- When referencing files, include line numbers where possible, e.g. "src/index.ts:10-20" for lines 10 to 20 in src/index.ts.
+
+Current working directory: ` + cwd + "\n\n"
+
 const (
-	Reset   = "\033[0m"
-	Bold    = "\033[1m"
-	Dim     = "\033[2m"
-	
+	Reset = "\033[0m"
+	Bold  = "\033[1m"
+	Dim   = "\033[2m"
+
 	Black   = "\033[30m"
 	Red     = "\033[31m"
 	Green   = "\033[32m"
@@ -24,9 +43,9 @@ const (
 	Blue    = "\033[34m"
 	Magenta = "\033[35m"
 	Cyan    = "\033[36m"
-	White   = "\033[37m"
-	
-	Gray    = "\033[90m"
+	White   = "\033[97m"
+
+	Gray = "\033[90m"
 )
 
 func main() {
@@ -37,18 +56,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println(Bold+Cyan+"Apollo AI Assistant"+Reset)
-	fmt.Println(Gray+"Type your prompt and press Enter to send. Type 'quit' to exit."+Reset)
-	fmt.Println(Gray+"Available tools: ls, read"+Reset)
+	fmt.Println(Bold + Cyan + "Apollo AI Assistant" + Reset)
+	fmt.Println(Gray + "Type your prompt and press Enter to send. Type 'quit' to exit." + Reset)
+	fmt.Println(Gray + "Available tools: ls, read" + Reset)
 	fmt.Println()
 
 	reader := bufio.NewReader(os.Stdin)
 	messages := []Message{
-		{Role: "system", Content: "You are Apollo, an AI coding assistant.\n\nAvailable tools:\n- ls: List directory contents\n- read: Read file contents\n\nBe helpful and concise."},
+		{Role: "system", Content: SYSTEM_PROMPT},
 	}
 
 	for {
-		fmt.Print(Blue+"You: "+Reset)
+		fmt.Print(Blue + "You: " + Reset)
 		prompt, err := reader.ReadString('\n')
 		if err != nil {
 			break
@@ -77,7 +96,7 @@ func main() {
 
 		messages = append(messages, Message{Role: "user", Content: prompt})
 
-		fmt.Println(Dim+"Thinking..."+Reset)
+		fmt.Println(Dim + "Thinking..." + Reset)
 
 		resp, toolCall, err := sendRequest(client, apiKey, messages)
 		if err != nil {
@@ -88,11 +107,13 @@ func main() {
 
 		// Execute tool if present
 		if toolCall != nil {
-			arguments := "{}"
+			argsMap := map[string]string{}
 			if len(toolCall.Args) > 0 {
-				arguments = `{"path":"` + toolCall.Args[0] + `"}`
+				argsMap["path"] = toolCall.Args[0]
 			}
-			
+			argsBytes, _ := json.Marshal(argsMap)
+			arguments := string(argsBytes)
+
 			// Add assistant message with tool call
 			messages = append(messages, Message{
 				Role:      "assistant",
@@ -101,7 +122,7 @@ func main() {
 			})
 
 			// Execute tool
-			fmt.Print(Green+"Executing: "+Reset+toolCall.Name+"\n")
+			fmt.Print(Green + "Executing: " + Reset + toolCall.Name + "\n")
 			result, err := ExecuteTool(toolCall.Name, toolCall.Args)
 			if err != nil {
 				messages = append(messages, Message{Role: "tool", ToolCallID: "call_1", Content: fmt.Sprintf("Error: %v", err)})
@@ -110,7 +131,7 @@ func main() {
 			}
 
 			// Get final response
-			fmt.Println(Dim+"Thinking..."+Reset)
+			fmt.Println(Dim + "Thinking..." + Reset)
 			resp, _, err = sendRequest(client, apiKey, messages)
 			if err != nil {
 				fmt.Printf(Red+"Error: %v"+Reset+"\n\n", err)
@@ -119,17 +140,17 @@ func main() {
 		}
 
 		messages = append(messages, Message{Role: "assistant", Content: resp})
-		fmt.Printf(Red+"Apollo: "+White+"%s"+Reset+"\n\n", resp)
+		fmt.Printf(Red+"Apollo: "+Reset+"%s"+"\n\n", resp)
 	}
 }
 
 // Message represents a chat message
 type Message struct {
-	Role      string `json:"role"`
-	Content   string `json:"content,omitempty"`
-	Name      string `json:"name,omitempty"`
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	ToolCalls []ToolCallInfo `json:"tool_calls,omitempty"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content,omitempty"`
+	Name       string         `json:"name,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	ToolCalls  []ToolCallInfo `json:"tool_calls,omitempty"`
 }
 
 // ToolCallInfo for function calls
@@ -139,9 +160,9 @@ type FC struct {
 }
 
 type ToolCallInfo struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	Function FC `json:"function"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function FC     `json:"function"`
 }
 
 // ToolCall represents a tool invocation
@@ -170,8 +191,8 @@ type ToolDef struct {
 // Choice from API response
 type Choice struct {
 	Message struct {
-		Role      string `json:"role"`
-		Content   string `json:"content"`
+		Role      string         `json:"role"`
+		Content   string         `json:"content"`
 		ToolCalls []ToolCallInfo `json:"tool_calls,omitempty"`
 	} `json:"message"`
 	FinishReason string `json:"finish_reason"`
@@ -200,7 +221,7 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 			},
 		},
 	}
-	
+
 	readTool := ToolDef{
 		Type: "function",
 		Function: struct {
