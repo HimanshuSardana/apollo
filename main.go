@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/glamour"
+	"github.com/chzyer/readline"
 	"golang.org/x/term"
 )
 
@@ -19,6 +21,52 @@ var (
 	cwd, _    = os.Getwd()
 	debugMode bool
 )
+
+// filenameAutoCompleter provides tab completion for filenames
+type filenameAutoCompleter struct{}
+
+func (c *filenameAutoCompleter) Do(line []rune, pos int) (newLine [][]rune, length int) {
+	lineStr := string(line)
+
+	// Find the start of the current word
+	start := pos
+	for start > 0 && line[start-1] != ' ' {
+		start--
+	}
+
+	prefix := lineStr[start:pos]
+
+	dir := filepath.Dir(prefix)
+	if dir == "" {
+		dir = "."
+	}
+	base := filepath.Base(prefix)
+
+	// Read directory entries
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, 0
+	}
+
+	// Find matching entries
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, base) {
+			continue
+		}
+
+		// Return the suffix that completes the word
+		suffix := name[len(base):]
+		if entry.IsDir() {
+			suffix += "/"
+		}
+
+		newLine = append(newLine, []rune(suffix))
+	}
+
+	// length=0 means we're inserting at cursor, not replacing
+	return newLine, 0
+}
 
 var SYSTEM_PROMPT = `You are an AI assistant that helps the user understand and navigate the codebase in the current working directory. You have access to the following tools:
 
@@ -85,17 +133,28 @@ func main() {
 
 	fmt.Println(Bold + Cyan + "Apollo AI Assistant" + Reset)
 	fmt.Println(Gray + "Type your prompt and press Enter to send. Type 'quit' to exit." + Reset)
-	fmt.Println(Gray + "Available tools: ls, read, bash" + Reset)
+	fmt.Println(Gray + "Available tools: ls, read, bash | Tab: autocomplete filenames" + Reset)
 	fmt.Println()
 
-	reader := bufio.NewReader(os.Stdin)
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          Cyan + "You: " + Reset,
+		InterruptPrompt: "^C",
+		EOFPrompt:       "quit",
+		AutoComplete:    &filenameAutoCompleter{},
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error creating readline:", err)
+		os.Exit(1)
+	}
+	defer rl.Close()
+
 	messages := []Message{
 		{Role: "system", Content: SYSTEM_PROMPT},
 	}
 
 	for {
 		fmt.Print(Blue + "You: " + Reset)
-		prompt, err := reader.ReadString('\n')
+		prompt, err := rl.Readline()
 		if err != nil {
 			break
 		}
@@ -128,7 +187,7 @@ func main() {
 		var thinkingBuffer strings.Builder
 		var lineCount int
 		var resp string
-		
+
 		// Tool call chaining loop
 		for {
 			var thinking string
@@ -164,18 +223,18 @@ func main() {
 			thinkingStr := thinkingBuffer.String()
 			if thinkingStr != "" {
 				fmt.Println()
-				fmt.Println(Dim + "💭 Thinking: " + thinkingStr + Reset)
+				fmt.Println(Dim + "Thinking: " + thinkingStr + Reset)
 			}
 
 			// Print all tool call details with dimmed color
 			fmt.Println()
-			fmt.Printf(Dim+"🔧 Tool Calls (%d):"+Reset+"\n", len(toolCalls))
-			
+			fmt.Printf(Dim+"Tool Calls (%d):"+Reset+"\n", len(toolCalls))
+
 			var toolCallInfos []ToolCallInfo
 			for i, tc := range toolCalls {
 				fmt.Printf(Dim+"  [%d] Name: %s"+Reset+"\n", i+1, tc.Name)
 				fmt.Printf(Dim+"      Arguments: %s"+Reset+"\n", tc.RawArgs)
-				
+
 				arguments := tc.RawArgs
 				if arguments == "" {
 					argsMap := map[string]string{}
