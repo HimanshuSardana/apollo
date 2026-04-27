@@ -112,11 +112,15 @@ func main() {
 
 		messages = append(messages, Message{Role: "user", Content: prompt})
 
-		fmt.Println(Dim + "Thinking..." + Reset)
+		fmt.Print(Red + "Apollo: " + Reset)
 
-		resp, toolCall, err := sendRequest(client, apiKey, messages)
+		var outputBuffer strings.Builder
+		resp, toolCall, err := sendRequest(client, apiKey, messages, true, func(chunk string) {
+			outputBuffer.WriteString(chunk)
+			fmt.Print(chunk)
+		})
 		if err != nil {
-			fmt.Printf(Red+"Error: %v"+Reset+"\n\n", err)
+			fmt.Printf(Red+"\nError: %v"+Reset+"\n\n", err)
 			messages = messages[:len(messages)-1]
 			continue
 		}
@@ -138,7 +142,7 @@ func main() {
 				ToolCalls: []ToolCallInfo{{ID: "call_1", Type: "function", Function: FC{Name: toolCall.Name, Arguments: arguments}}},
 			})
 
-			fmt.Print(Green + "Executing: " + Reset + toolCall.Name + "\n")
+			fmt.Print(Green + "\nExecuting: " + Reset + toolCall.Name + "\n")
 			result, err := ExecuteTool(toolCall.Name, toolCall.Args)
 			if err != nil {
 				messages = append(messages, Message{Role: "tool", ToolCallID: "call_1", Content: fmt.Sprintf("Error: %v", err)})
@@ -147,21 +151,27 @@ func main() {
 			}
 
 			// Get final response
-			fmt.Println(Dim + "Thinking..." + Reset)
-			resp, _, err = sendRequest(client, apiKey, messages)
+			fmt.Print(Red + "\nApollo: " + Reset)
+			outputBuffer.Reset()
+			resp, _, err = sendRequest(client, apiKey, messages, true, func(chunk string) {
+				outputBuffer.WriteString(chunk)
+				fmt.Print(chunk)
+			})
 			if err != nil {
-				fmt.Printf(Red+"Error: %v"+Reset+"\n\n", err)
+				fmt.Printf(Red+"\nError: %v"+Reset+"\n\n", err)
 				continue
 			}
 		}
 
 		messages = append(messages, Message{Role: "assistant", Content: resp})
 
-		rendered, err := renderer.Render(resp)
-		if err != nil {
-			rendered = resp
+		// Clear the streaming line and re-render with glamour for final output
+		fmt.Print("\r\033[K") // Clear to end of line
+		rendered, renderErr := renderer.Render(outputBuffer.String())
+		if renderErr != nil {
+			rendered = outputBuffer.String()
 		}
-		fmt.Printf(Red+"Apollo: "+Reset+"%s"+"\n", rendered)
+		fmt.Printf(Red+"Apollo: "+Reset+"%s"+"\n\n", rendered)
 	}
 }
 
@@ -184,6 +194,7 @@ type ToolCallInfo struct {
 	ID       string `json:"id"`
 	Type     string `json:"type"`
 	Function FC     `json:"function"`
+	Index    int    `json:"index,omitempty"`
 }
 
 // ToolCall represents a tool invocation
@@ -198,6 +209,19 @@ type Request struct {
 	Model    string    `json:"model"`
 	Messages []Message `json:"messages"`
 	Tools    []ToolDef `json:"tools,omitempty"`
+	Stream   bool      `json:"stream,omitempty"`
+}
+
+// StreamChoice represents a streaming chunk
+type StreamChoice struct {
+	Delta        Message `json:"delta"`
+	Index        int     `json:"index"`
+	FinishReason *string `json:"finish_reason"`
+}
+
+// StreamResponse is a single SSE chunk
+type StreamResponse struct {
+	Choices []StreamChoice `json:"choices"`
 }
 
 // ToolDef is a tool definition for the API
@@ -225,7 +249,7 @@ type Response struct {
 	Choices []Choice `json:"choices"`
 }
 
-func sendRequest(client *http.Client, apiKey string, messages []Message) (string, *ToolCall, error) {
+func sendRequest(client *http.Client, apiKey string, messages []Message, stream bool, onChunk func(string)) (string, *ToolCall, error) {
 	lsTool := ToolDef{
 		Type: "function",
 		Function: struct {
@@ -281,6 +305,7 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 		Model:    "minimax-m2.5",
 		Messages: messages,
 		Tools:    []ToolDef{lsTool, readTool, bashTool},
+		Stream:   stream,
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -301,6 +326,89 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
+	if stream {
+		return handleStreamingResponse(client, req, onChunk)
+	}
+
+	return handleNonStreamingResponse(client, req)
+}
+
+func handleStreamingResponse(client *http.Client, req *http.Request, onChunk func(string)) (string, *ToolCall, error) {
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", nil, fmt.Errorf("API returned status %d", resp.StatusCode)
+	}
+
+	var fullContent strings.Builder
+	var toolCall *ToolCall
+	var accumulatedToolCalls []ToolCallInfo
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		data := strings.TrimPrefix(line, "data: ")
+		if data == "[DONE]" {
+			break
+		}
+
+		var streamResp StreamResponse
+		if err := json.Unmarshal([]byte(data), &streamResp); err != nil {
+			continue
+		}
+
+		if len(streamResp.Choices) == 0 {
+			continue
+		}
+
+		choice := streamResp.Choices[0]
+		delta := choice.Delta
+
+		// Accumulate content
+		if delta.Content != "" {
+			fullContent.WriteString(delta.Content)
+			if onChunk != nil {
+				onChunk(delta.Content)
+			}
+		}
+
+		// Accumulate tool calls
+		if len(delta.ToolCalls) > 0 {
+			for _, tc := range delta.ToolCalls {
+				if tc.Index < len(accumulatedToolCalls) {
+					accumulatedToolCalls[tc.Index].Function.Arguments += tc.Function.Arguments
+				} else {
+					accumulatedToolCalls = append(accumulatedToolCalls, tc)
+				}
+			}
+		}
+
+		// Check for finish
+		if choice.FinishReason != nil {
+			if *choice.FinishReason == "tool_calls" && len(accumulatedToolCalls) > 0 {
+				tc := accumulatedToolCalls[0]
+				toolCall = &ToolCall{
+					Name:    tc.Function.Name,
+					Args:    parseToolArgs(tc.Function.Arguments),
+					RawArgs: tc.Function.Arguments,
+				}
+			}
+			break
+		}
+	}
+
+	return fullContent.String(), toolCall, scanner.Err()
+}
+
+func handleNonStreamingResponse(client *http.Client, req *http.Request) (string, *ToolCall, error) {
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", nil, err
@@ -322,7 +430,6 @@ func sendRequest(client *http.Client, apiKey string, messages []Message) (string
 
 	msg := chatResp.Choices[0].Message
 
-	// Check for tool call
 	var toolCall *ToolCall
 	if len(msg.ToolCalls) > 0 {
 		tc := msg.ToolCalls[0]
