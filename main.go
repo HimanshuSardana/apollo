@@ -108,16 +108,12 @@ func (c *commandAutoCompleter) Do(line []rune, pos int) (newLine [][]rune, lengt
 	}
 
 	// Get the current command word (without the /)
-	var searchStart int
-	if start > 1 {
-		searchStart = start
-	}
-	prefixEnd := searchStart
+	prefixEnd := start
 	for prefixEnd < pos && line[prefixEnd] != ' ' {
 		prefixEnd++
 	}
 
-	prefix := lineStr[searchStart:prefixEnd]
+	prefix := lineStr[start:prefixEnd]
 
 	// Find matching commands
 	for _, cmd := range availableCommands {
