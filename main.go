@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/glamour"
 	"github.com/chzyer/readline"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -22,6 +23,14 @@ var (
 	debugMode bool
 	safeMode  bool
 )
+
+type Config struct {
+	BaseURL   string `yaml:"base_url"`
+	ModelName string `yaml:"model_name"`
+}
+
+// AppConfig is the global configuration instance
+var AppConfig Config
 
 // usageTracker holds cumulative token usage for a session
 var usageTracker = UsageTracker{
@@ -90,6 +99,51 @@ var availableCommands = []string{
 	"usage",
 	"clear",
 	"help",
+}
+
+// skillAutoCompleter provides tab completion for /skill: command
+type skillAutoCompleter struct{}
+
+func (c *skillAutoCompleter) Do(line []rune, pos int) (newLine [][]rune, length int) {
+	lineStr := string(line)
+
+	// Only complete if line starts with /skill:
+	if !strings.HasPrefix(lineStr, "/skill:") {
+		return nil, 0
+	}
+
+	// Find the start of the skill name (after /skill:)
+	prefix := "/skill:"
+	start := len(prefix)
+	for start < pos && line[start] == ' ' {
+		start++
+	}
+
+	// Get the current skill name prefix
+	currentPrefix := lineStr[start:pos]
+
+	// Read skills directory
+	skillsDir := "/home/himanshu/.agents/skills"
+	entries, err := os.ReadDir(skillsDir)
+	if err != nil {
+		return nil, 0
+	}
+
+	// Find matching skills
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, currentPrefix) {
+			continue
+		}
+
+		suffix := name[len(currentPrefix):]
+		newLine = append(newLine, []rune(suffix+" "))
+	}
+
+	return newLine, 0
 }
 
 func (c *commandAutoCompleter) Do(line []rune, pos int) (newLine [][]rune, length int) {
@@ -164,9 +218,24 @@ func main() {
 	flag.BoolVar(&debugMode, "debug", false, "Print API request JSON for debugging")
 	flag.BoolVar(&safeMode, "safe", false, "Ask for confirmation before applying edits")
 	flag.Parse()
-	
+
 	// Set safe mode for tools package
 	SafeMode = safeMode
+
+	configPath := filepath.Join(cwd, "config.yaml")
+	if err := loadConfig(configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Could not load config.yaml: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Using default configuration")
+		AppConfig = Config{
+			BaseURL:   "https://opencode.ai/zen/go/v1/chat/completions",
+			ModelName: "minimax-m2.5",
+		}
+	}
+
+	if debugMode {
+		fmt.Printf("Using API endpoint: %s\n", AppConfig.BaseURL)
+		fmt.Printf("Using model: %s\n", AppConfig.ModelName)
+	}
 
 	client := &http.Client{}
 	apiKey := os.Getenv("OPENCODE_API_KEY")
@@ -192,8 +261,8 @@ func main() {
 
 	fmt.Println(Bold + Cyan + "Apollo AI Assistant" + Reset)
 	fmt.Println(Gray + "Type your prompt and press Enter to send. Type 'quit' to exit." + Reset)
-	fmt.Println(Gray + "Available tools: ls, read, bash, edit | Tab: autocomplete filenames or commands (when starting with /)" + Reset)
-	fmt.Println(Gray + "Commands: /usage - Show token usage for this session" + Reset)
+	fmt.Printf(Gray+"Model: %s | Tools: ls, read, bash, edit | Tab: autocomplete\n"+Reset, AppConfig.ModelName)
+	fmt.Println(Gray + "Commands: /usage - Show token usage | /skill:<name> - Load a skill (tab complete)" + Reset)
 	fmt.Println()
 
 	rl, err := readline.NewEx(&readline.Config{
@@ -224,6 +293,32 @@ func main() {
 		}
 		if strings.ToLower(prompt) == "quit" {
 			break
+		}
+
+		// Handle /skill: prefix - load skill and prepend to message
+		if strings.HasPrefix(prompt, "/skill:") {
+			skillName := strings.TrimSpace(strings.TrimPrefix(prompt, "/skill:"))
+			// Extract just the skill name (first word)
+			parts := strings.Fields(skillName)
+			if len(parts) > 0 {
+				skillName = parts[0]
+			}
+			
+			if skillName != "" {
+				skillPath := filepath.Join("/home/himanshu/.agents/skills", skillName, "SKILL.md")
+				skillContent, err := os.ReadFile(skillPath)
+				if err != nil {
+					fmt.Printf(Red+"Error: Could not load skill '%s': %v"+Reset+"\n\n", skillName, err)
+					continue
+				}
+				
+				// Get the rest of the user's message after the skill name
+				restOfMessage := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(prompt, "/skill:"), skillName))
+				
+				// Prepend skill content to the message
+				prompt = string(skillContent) + "\n\n" + restOfMessage
+				fmt.Printf(Green+"✓ Loaded skill: %s"+Reset+"\n", skillName)
+			}
 		}
 
 		if strings.HasPrefix(prompt, "/") {
@@ -370,7 +465,6 @@ func main() {
 	}
 }
 
-// printUsage displays the current token usage statistics
 func printUsage() {
 	if usageTracker.requestCount == 0 {
 		fmt.Println(Yellow + "No API requests made yet in this session." + Reset)
@@ -552,7 +646,7 @@ func sendRequest(client *http.Client, apiKey string, messages []Message, stream 
 	}
 
 	reqBody := Request{
-		Model:    "minimax-m2.5",
+		Model:    AppConfig.ModelName,
 		Messages: messages,
 		Tools:    []ToolDef{lsTool, readTool, bashTool, editTool},
 		Stream:   stream,
@@ -568,7 +662,7 @@ func sendRequest(client *http.Client, apiKey string, messages []Message, stream 
 	}
 
 	req, err := http.NewRequestWithContext(context.Background(), "POST",
-		"https://opencode.ai/zen/go/v1/chat/completions", bytes.NewBuffer(jsonBody))
+		AppConfig.BaseURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", "", nil, nil, err
 	}
@@ -715,7 +809,7 @@ func parseToolArgs(args string) []string {
 	if err := json.Unmarshal([]byte(args), &argsMap); err != nil {
 		return nil
 	}
-	
+
 	// Handle edit tool: requires path and new_content
 	if path, ok := argsMap["path"].(string); ok {
 		if newContent, ok := argsMap["new_content"].(string); ok {
@@ -727,24 +821,36 @@ func parseToolArgs(args string) []string {
 		}
 		return []string{path}
 	}
-	
+
 	if cmd, ok := argsMap["cmd"].(string); ok && cmd != "" {
 		return []string{cmd}
 	}
 	return nil
 }
 
-// combinedCompleter switches between command and filename completion
+// loadConfig reads configuration from config.yaml
+func loadConfig(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	return yaml.Unmarshal(data, &AppConfig)
+}
+
+// combinedCompleter switches between command, skill, and filename completion
 type combinedCompleter struct{}
 
 func (c *combinedCompleter) Do(line []rune, pos int) (newLine [][]rune, length int) {
 	lineStr := string(line)
 
-	// If line starts with /, use command completer
+	if strings.HasPrefix(lineStr, "/skill:") {
+		return (&skillAutoCompleter{}).Do(line, pos)
+	}
+
 	if strings.HasPrefix(lineStr, "/") {
 		return (&commandAutoCompleter{}).Do(line, pos)
 	}
 
-	// Otherwise use filename completer
 	return (&filenameAutoCompleter{}).Do(line, pos)
 }
