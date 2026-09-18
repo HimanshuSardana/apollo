@@ -104,7 +104,9 @@ View on GitHub</a>
 <ul class="feat-list">
 <li><b>Interactive CLI</b>: prompt, think, act — a tight terminal loop with ANSI colors</li>
 <li><b>Tool execution</b>: the agent runs shell commands itself, chaining calls automatically — <a href="tools/">how tools work</a></li>
-<li><b>Built-in tools</b>: <code>ls</code>, <code>read</code>, <code>bash</code> — run manually anytime with a <code>/</code> prefix</li>
+<li><b>Built-in tools</b>: <code>ls</code>, <code>read</code>, <code>bash</code>, <code>edit</code> — run manually anytime with a <code>/</code> prefix</li>
+<li><b>Diff previews</b>: edits show a colorized unified diff before anything is applied</li>
+<li><b>Skills</b>: <code>/skill:&lt;name&gt;</code> loads reusable agent workflows — <a href="skills/">how skills work</a></li>
 <li><b>Tab completion</b>: autocomplete filenames mid-command, shell-style</li>
 <li><b>Markdown rendering</b>: formatted answers via glamour, not raw dumps</li>
 <li><b>Debug mode</b>: <code>apollo -d</code> prints the raw API request JSON</li>
@@ -132,6 +134,7 @@ View on GitHub</a>
 <li><b><code>ls</code></b> — list directory contents, so the agent sees your project layout</li>
 <li><b><code>read</code></b> — read file contents into context before answering</li>
 <li><b><code>bash</code></b> — execute shell commands, chained automatically across turns</li>
+<li><b><code>edit</code></b> — rewrite files with a diff preview shown first</li>
 <li>Prefix any of them with <code>/</code> (<code>/ls</code>) to run one yourself — <a href="tools/">tool guide</a></li>
 </ul>
 
@@ -140,7 +143,8 @@ View on GitHub</a>
 <div class="qa"><p class="q">What do I need to run apollo?</p><p>Go 1.25+ to install, and an <code>OPENCODE_API_KEY</code> from <a href="https://opencode.ai" target="_blank" rel="noreferrer">opencode.ai</a> — the model (MiniMax-M2.5) is served through their OpenAI-compatible API.</p></div>
 <div class="qa"><p class="q">Is apollo free?</p><p>Yes — MIT-licensed and open source. Model usage is billed by your opencode.ai account, if applicable.</p></div>
 <div class="qa"><p class="q">How do the tools work?</p><p>The agent requests tool calls (<code>ls</code>, <code>read</code>, <code>bash</code>), apollo executes them locally and feeds results back — chaining automatically until the answer is ready. <a href="tools/">Details here</a>.</p></div>
-<div class="qa"><p class="q">Can I see what it sends to the API?</p><p>Yes — run <code>apollo -d</code> (or <code>--debug</code>) to print the raw request JSON.</p></div>
+<div class="qa"><p class="q">Can I see what it sends to the API?</p><p>Yes — run <code>apollo -d</code> (or <code>--debug</code>) to print the raw request JSON. <code>/usage</code> shows the session's token totals.</p></div>
+<div class="qa"><p class="q">How do skills work?</p><p>Type <code>/skill:&lt;name&gt;</code> and apollo prepends that skill's instructions to your message — <a href="skills/">full guide here</a>.</p></div>
 <div class="qa"><p class="q">I found a bug / want a feature?</p><p>Open an <a href="https://github.com/HimanshuSardana/apollo/issues" target="_blank" rel="noreferrer">issue</a> or pull request on GitHub.</p></div>
 </div>
 
