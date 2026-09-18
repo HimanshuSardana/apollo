@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="description" content="apollo — a CLI AI coding assistant written in Go. Your terminal pair-programmer." />
+<title>{{ .SiteTitle }}</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='white'/%3E%3Cpath d='M24 6 L36 19 L24 32 L12 19 Z' fill='%23a3e635'/%3E%3Cpath d='M24 6 L24 32 M12 19 L36 19' stroke='%234d7c0f' stroke-width='2'/%3E%3C/svg%3E" />
+<style>
+:root{--bg:#000;--text:#ededed;--muted:#a1a1aa;--faint:#71717a;--border:#1f1f23;--pill:#fff;--pill-text:#000;--ghost:transparent;--ghost-border:#2e2e33;--code-bg:#0d0d0f}
+[data-theme="light"]{--bg:#fff;--text:#111;--muted:#52525b;--faint:#a1a1aa;--border:#e9e9ec;--pill:#111;--pill-text:#fff;--ghost:transparent;--ghost-border:#d4d4d8;--code-bg:#f4f4f5}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--muted);font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;font-size:15.5px;line-height:1.75;-webkit-font-smoothing:antialiased;transition:background .2s}
+::selection{background:#c4b5fd;color:#000}
+.wrap{max-width:660px;margin:0 auto;padding:0 1.25rem}
+/* top nav */
+.topbar{display:flex;align-items:center;justify-content:center;gap:1.4rem;padding:.9rem 1rem;font-size:.85rem;position:relative;max-width:900px;margin:0 auto}
+.topbar a.nl{color:var(--muted);text-decoration:none}
+.topbar a.nl:hover{color:var(--text)}
+.top-actions{position:absolute;right:1rem;display:flex;align-items:center;gap:.7rem}
+.gh-link{color:var(--muted);text-decoration:none;display:flex;align-items:center}
+.gh-link:hover{color:var(--text)}
+.icon-btn{background:none;border:none;cursor:pointer;color:var(--muted);padding:.25rem;display:flex;align-items:center}
+.icon-btn svg{display:block}
+.btn svg{flex-shrink:0}
+.icon-btn:hover{color:var(--text)}
+.pill-sm{background:var(--pill);color:var(--pill-text);border-radius:99px;padding:.42rem .95rem;font-size:.8rem;font-weight:600;text-decoration:none;white-space:nowrap}
+@media(max-width:640px){.topbar{justify-content:flex-start;overflow-x:auto}.topbar a.nl.hide-m{display:none}}
+/* logo */
+.logo-row{display:flex;align-items:center;gap:.8rem;margin:4.5rem 0 2.2rem}
+.logo-mark{width:42px;height:42px;border-radius:11px;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+[data-theme="light"] .logo-mark{box-shadow:0 0 0 1px var(--border),0 4px 14px rgba(0,0,0,.08)}
+.logo-name{font-size:1.35rem;font-weight:600;color:var(--text);letter-spacing:-.01em}
+/* typewriter */
+.tagline-title{font-size:1.3rem;font-weight:600;color:var(--text);margin-bottom:1.2rem;letter-spacing:-.01em}
+/* prose */
+.lede{margin-bottom:2rem}
+.lede a,.feat-list a,.faq a{color:var(--text);text-decoration:underline;text-decoration-color:var(--faint);text-underline-offset:3px}
+.lede a:hover,.feat-list a:hover,.faq a:hover{text-decoration-color:var(--text)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.87em}
+/* buttons */
+.btn-row{display:flex;gap:.7rem;flex-wrap:wrap;margin-bottom:3rem}
+.btn{display:inline-flex;align-items:center;gap:.5rem;border-radius:99px;padding:.68rem 1.35rem;font-size:.9rem;font-weight:600;text-decoration:none;transition:.15s}
+.btn-solid{background:var(--pill);color:var(--pill-text)}
+.btn-solid:hover{opacity:.88}
+.btn-ghost{border:1px solid var(--ghost-border);color:var(--text)}
+.btn-ghost:hover{border-color:var(--faint)}
+/* sections */
+.sec-label{font-size:.85rem;color:var(--muted);margin:2.8rem 0 .8rem}
+.feat-list{list-style:none}
+.feat-list li{padding:.32rem 0 .32rem 1.3rem;position:relative}
+.feat-list li::before{content:"–";position:absolute;left:0;color:var(--faint)}
+.feat-list b{color:var(--text);font-weight:600}
+/* quickstart box */
+.cmd-box{background:var(--code-bg);border:1px solid var(--border);border-radius:12px;padding:1rem 1.2rem;font-family:ui-monospace,Menlo,monospace;font-size:.82rem;line-height:1.9;margin-top:1rem;overflow-x:auto;white-space:pre}
+.cmd-box .c{color:var(--faint)} .cmd-box .p{color:#8b5cf6}
+/* faq */
+.qa{margin-bottom:1.4rem}
+.qa .q{color:var(--text);font-weight:600;margin-bottom:.2rem}
+/* footer */
+footer.site{margin-top:4rem;border-top:1px solid var(--border);padding:2rem 0 3rem;font-size:.83rem}
+.foot-cols{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2rem}
+@media(max-width:560px){.foot-cols{grid-template-columns:1fr 1fr}}
+.foot-cols h5{color:var(--text);font-size:.78rem;margin-bottom:.55rem;font-weight:600}
+.foot-cols a{display:block;color:var(--muted);text-decoration:none;margin-bottom:.35rem}
+.foot-cols a:hover{color:var(--text)}
+.foot-base{display:flex;justify-content:space-between;flex-wrap:wrap;gap:.5rem;color:var(--faint);font-size:.78rem}
+</style>
+</head>
+<body>
+<div class="topbar">
+<a class="nl hide-m" href="#docs">Docs</a>
+<a class="nl hide-m" href="#tools">Tools</a>
+<a class="nl hide-m" href="#faq">FAQ</a>
+<a class="nl" href="https://github.com/HimanshuSardana/apollo" target="_blank" rel="noreferrer">GitHub</a>
+<div class="top-actions">
+<a class="gh-link" href="https://github.com/HimanshuSardana/apollo" target="_blank" rel="noreferrer" aria-label="GitHub">
+<svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+</a>
+<a class="pill-sm" href="#docs">Get started</a>
+<button class="icon-btn" id="theme-toggle" aria-label="Toggle theme"><svg id="icon-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><svg id="icon-moon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
+</div>
+</div>
+
+<div class="wrap">
+<div class="logo-row">
+<div class="logo-mark"><svg width="26" height="26" viewBox="0 0 48 48" aria-hidden="true"><ellipse cx="24" cy="25" rx="16" ry="6.5" fill="none" stroke="#7c3aed" stroke-width="2.4" transform="rotate(-20 24 25)"/><circle cx="24" cy="25" r="8" fill="#c4b5fd"/><circle cx="21.5" cy="22.5" r="2.2" fill="#7c3aed"/></svg></div>
+<div class="logo-name">apollo</div>
+</div>
+
+<h1 class="tagline-title">An AI pair-programmer in your terminal.</h1>
+
+<p class="lede">Free and open source CLI coding assistant written in <a href="https://go.dev" target="_blank" rel="noreferrer">Go</a>, powered by MiniMax-M2.5 via the <a href="https://opencode.ai" target="_blank" rel="noreferrer">opencode.ai</a> API. Set <code>OPENCODE_API_KEY</code>, run <code>apollo</code>, and start delegating — <a href="quickstart/">get going in a minute</a>.</p>
+
+<div class="btn-row">
+<a class="btn btn-solid" href="#docs"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>Quickstart</a>
+<a class="btn btn-ghost" href="https://github.com/HimanshuSardana/apollo" target="_blank" rel="noreferrer">
+<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+View on GitHub</a>
+</div>
+
+<div class="sec-label">Features</div>
+<ul class="feat-list">
+<li><b>Interactive CLI</b>: prompt, think, act — a tight terminal loop with ANSI colors</li>
+<li><b>Tool execution</b>: the agent runs shell commands itself, chaining calls automatically — <a href="tools/">how tools work</a></li>
+<li><b>Built-in tools</b>: <code>ls</code>, <code>read</code>, <code>bash</code> — run manually anytime with a <code>/</code> prefix</li>
+<li><b>Tab completion</b>: autocomplete filenames mid-command, shell-style</li>
+<li><b>Markdown rendering</b>: formatted answers via glamour, not raw dumps</li>
+<li><b>Debug mode</b>: <code>apollo -d</code> prints the raw API request JSON</li>
+<li><b>One binary</b>: <code>go install</code> and you are done — <a href="quickstart/">install guide</a></li>
+<li><b>Open source</b>: MIT-licensed, source on <a href="https://github.com/HimanshuSardana/apollo" target="_blank" rel="noreferrer">GitHub</a> — <a href="why-apollo/">why it exists</a></li>
+</ul>
+
+<div class="sec-label" id="docs">Docs</div>
+<ul class="feat-list">
+<li><b>Install &amp; run</b>: <code>go install github.com/HimanshuSardana/apollo@latest</code>, set <code>OPENCODE_API_KEY</code>, run <code>apollo</code> — <a href="quickstart/">full quickstart</a></li>
+{{ range .Posts }}
+<li><b>{{ .Title }}</b>{{ range .Tags }} · {{ . }}{{ end }} — <a href="{{ .Slug }}/">read</a></li>
+{{ end }}
+</ul>
+
+<div class="cmd-box"><span class="c"># install</span>
+<span class="p">$</span> go install github.com/HimanshuSardana/apollo@latest
+<span class="c"># configure (get a key from opencode.ai)</span>
+<span class="p">$</span> export OPENCODE_API_KEY=your_api_key
+<span class="c"># ask it something, quit with 'quit'</span>
+<span class="p">$</span> apollo</div>
+
+<div class="sec-label" id="tools">Tools</div>
+<ul class="feat-list">
+<li><b><code>ls</code></b> — list directory contents, so the agent sees your project layout</li>
+<li><b><code>read</code></b> — read file contents into context before answering</li>
+<li><b><code>bash</code></b> — execute shell commands, chained automatically across turns</li>
+<li>Prefix any of them with <code>/</code> (<code>/ls</code>) to run one yourself — <a href="tools/">tool guide</a></li>
+</ul>
+
+<div class="sec-label" id="faq">FAQ</div>
+<div class="faq">
+<div class="qa"><p class="q">What do I need to run apollo?</p><p>Go 1.25+ to install, and an <code>OPENCODE_API_KEY</code> from <a href="https://opencode.ai" target="_blank" rel="noreferrer">opencode.ai</a> — the model (MiniMax-M2.5) is served through their OpenAI-compatible API.</p></div>
+<div class="qa"><p class="q">Is apollo free?</p><p>Yes — MIT-licensed and open source. Model usage is billed by your opencode.ai account, if applicable.</p></div>
+<div class="qa"><p class="q">How do the tools work?</p><p>The agent requests tool calls (<code>ls</code>, <code>read</code>, <code>bash</code>), apollo executes them locally and feeds results back — chaining automatically until the answer is ready. <a href="tools/">Details here</a>.</p></div>
+<div class="qa"><p class="q">Can I see what it sends to the API?</p><p>Yes — run <code>apollo -d</code> (or <code>--debug</code>) to print the raw request JSON.</p></div>
+<div class="qa"><p class="q">I found a bug / want a feature?</p><p>Open an <a href="https://github.com/HimanshuSardana/apollo/issues" target="_blank" rel="noreferrer">issue</a> or pull request on GitHub.</p></div>
+</div>
+
+<footer class="site">
+<div class="foot-cols">
+<div><h5>Product</h5><a href="#docs">Docs</a><a href="#tools">Tools</a><a href="#faq">FAQ</a></div>
+<div><h5>Resources</h5><a href="quickstart/">Quickstart</a><a href="configuration/">Configuration</a><a href="feed.xml">RSS</a></div>
+<div><h5>Project</h5><a href="https://github.com/HimanshuSardana/apollo" target="_blank" rel="noreferrer">GitHub</a><a href="https://github.com/HimanshuSardana/apollo/issues" target="_blank" rel="noreferrer">Issues</a></div>
+<div><h5>Author</h5><a href="https://github.com/HimanshuSardana" target="_blank" rel="noreferrer">Himanshu</a><a href="../">Portfolio</a></div>
+</div>
+<div class="foot-base"><span>© {{ .Year }} Himanshu Sardana</span><span>Open source · MIT licensed</span></div>
+</footer>
+</div>
+
+<script>
+// theme toggle
+(function(){
+  var btn = document.getElementById('theme-toggle');
+  var saved = null;
+  try { saved = localStorage.getItem('apollo-theme'); } catch(e) {}
+  if (saved) { document.documentElement.setAttribute('data-theme', saved); }
+  function sync(){
+    var light = document.documentElement.getAttribute('data-theme') === 'light';
+    document.getElementById('icon-sun').style.display = light ? 'none' : 'block';
+    document.getElementById('icon-moon').style.display = light ? 'block' : 'none';
+  }
+  sync();
+  btn.addEventListener('click', function(){
+    var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    if (next === 'dark') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('apollo-theme', next); } catch(e) {}
+    sync();
+  });
+})();
+
+</script>
+</body>
+</html>

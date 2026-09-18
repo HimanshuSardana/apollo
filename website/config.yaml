@@ -1,0 +1,6 @@
+siteTitle: "apollo — CLI AI coding assistant"
+authorName: "apollo"
+authorRole: "Your terminal pair-programmer"
+authorBio: "A free, open source CLI AI coding assistant written in Go. Tool execution, tab completion, markdown rendering — one binary."
+defaultTheme: "showcase"
+siteUrl: "https://himanshu.co/apollo"

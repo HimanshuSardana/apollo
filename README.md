@@ -2,6 +2,10 @@
 
 A CLI AI coding assistant powered by MiniMax-M2.5 model via opencode.ai API.
 
+## Website
+
+Docs and landing page live at **https://himanshu.co/apollo** — source in [`website/`](website/).
+
 ## Features
 
 - **CLI Interface** - Interactive terminal UI with ANSI colors
