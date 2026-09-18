@@ -23,12 +23,14 @@ Type a prompt, press Enter, watch it think, execute tools and answer — rendere
 | Input | Behavior |
 |---|---|
 | Regular prompts | Sent to the model with conversation history |
-| `/ls`, `/read …`, `/bash …` | Run a tool directly, no model call |
+| `/ls`, `/read …`, `/bash …`, `/edit …` | Run a tool directly, no model call |
+| `/skill:<name>` | Load an agent skill, then send the rest of your message ([Skills](skills/)) |
+| `/usage` | Show session token usage (prompt / completion / total + request count) |
 | `quit` | Exit |
 
 ## Tab completion
 
-Filenames autocomplete as you type — handy for `read <Tab>` and `/bash <Tab>` without leaving the prompt.
+Filenames autocomplete as you type — handy for `read <Tab>` and `/bash <Tab>` without leaving the prompt. Skill names complete after `/skill:` too.
 
 ## Example session
 
