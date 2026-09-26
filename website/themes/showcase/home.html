@@ -17,22 +17,20 @@ body{background:var(--bg);color:var(--muted);font-family:-apple-system,BlinkMacS
 ::selection{background:#c4b5fd;color:#000}
 .wrap{max-width:660px;margin:0 auto;padding:0 1.25rem}
 /* top nav */
-.topbar{display:flex;align-items:center;gap:1.4rem;padding:.9rem 1rem;font-size:.85rem;position:relative;max-width:900px;margin:0 auto}
+.topbar{display:flex;align-items:center;justify-content:center;gap:1.4rem;padding:.9rem 1rem;font-size:.85rem;position:relative;max-width:900px;margin:0 auto}
 .topbar a.nl{color:var(--muted);text-decoration:none}
 .topbar a.nl:hover{color:var(--text)}
-.brand{margin-right:auto}.top-actions{margin-left:auto;display:flex;align-items:center;gap:.7rem}
+.brand{position:absolute;left:1rem;font-size:1.05rem;font-weight:600;color:var(--text);text-decoration:none;letter-spacing:-.01em}
+.top-actions{position:absolute;right:1rem;display:flex;align-items:center;gap:.7rem}
 .gh-link{color:var(--muted);text-decoration:none;display:flex;align-items:center}
 .gh-link:hover{color:var(--text)}
 .icon-btn{background:none;border:none;cursor:pointer;color:var(--muted);padding:.25rem;display:flex;align-items:center}
 .icon-btn svg{display:block}
 .btn svg{flex-shrink:0}
 .icon-btn:hover{color:var(--text)}
-@media(max-width:640px){.topbar{justify-content:flex-start;overflow-x:auto}.topbar a.nl.hide-m{display:none}}
-/* brand */
-.brand{font-size:1.05rem;font-weight:700;color:var(--text);letter-spacing:-.01em;text-decoration:none}
-.tagline-title{margin-top:4.5rem}
+@media(max-width:640px){.topbar{justify-content:flex-start;overflow-x:auto}.topbar a.nl.hide-m{display:none}.brand{position:static}}
 /* typewriter */
-.tagline-title{font-size:1.3rem;font-weight:600;color:var(--text);margin-bottom:1.2rem;letter-spacing:-.01em}
+.tagline-title{font-size:1.3rem;font-weight:600;color:var(--text);margin-top:4.5rem;margin-bottom:1.2rem;letter-spacing:-.01em}
 /* prose */
 .lede{margin-bottom:2rem}
 .lede a,.feat-list a,.faq a{color:var(--text);text-decoration:underline;text-decoration-color:var(--faint);text-underline-offset:3px}
@@ -116,9 +114,10 @@ html.traverse .prose{animation:vt-doc-back .4s cubic-bezier(.3,.7,.3,1) both}
 </head>
 <body>
 <div class="topbar">
-<a class="brand" href="#">apollo</a>
+<a class="brand" href="./">apollo</a>
 <a class="nl hide-m" href="#docs">Docs</a>
 <a class="nl hide-m" href="#tools">Tools</a>
+<a class="nl hide-m" href="#benchmarks">Benchmarks</a>
 <a class="nl hide-m" href="#faq">FAQ</a>
 <a class="nl" href="https://github.com/HimanshuSardana/apollo" target="_blank" rel="noreferrer">GitHub</a>
 <div class="top-actions">
