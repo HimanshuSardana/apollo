@@ -8,7 +8,6 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
 <link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@latest/400.css" rel="stylesheet" />
 <link href="https://cdn.jsdelivr.net/npm/@fontsource/iosevka@latest/500.css" rel="stylesheet" />
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' rx='11' fill='white'/%3E%3Cpath d='M24 6 L36 19 L24 32 L12 19 Z' fill='%23a3e635'/%3E%3Cpath d='M24 6 L24 32 M12 19 L36 19' stroke='%234d7c0f' stroke-width='2'/%3E%3C/svg%3E" />
 <style>
 :root{--bg:#000;--text:#ededed;--muted:#a1a1aa;--faint:#71717a;--border:#1f1f23;--pill:#fff;--pill-text:#000;--ghost:transparent;--ghost-border:#2e2e33;--code-bg:#0d0d0f}
 [data-theme="light"]{--bg:#fff;--text:#111;--muted:#52525b;--faint:#a1a1aa;--border:#e9e9ec;--pill:#111;--pill-text:#fff;--ghost:transparent;--ghost-border:#d4d4d8;--code-bg:#f4f4f5}
@@ -18,10 +17,10 @@ body{background:var(--bg);color:var(--muted);font-family:-apple-system,BlinkMacS
 ::selection{background:#c4b5fd;color:#000}
 .wrap{max-width:660px;margin:0 auto;padding:0 1.25rem}
 /* top nav */
-.topbar{display:flex;align-items:center;justify-content:center;gap:1.4rem;padding:.9rem 1rem;font-size:.85rem;position:relative;max-width:900px;margin:0 auto}
+.topbar{display:flex;align-items:center;gap:1.4rem;padding:.9rem 1rem;font-size:.85rem;position:relative;max-width:900px;margin:0 auto}
 .topbar a.nl{color:var(--muted);text-decoration:none}
 .topbar a.nl:hover{color:var(--text)}
-.top-actions{position:absolute;right:1rem;display:flex;align-items:center;gap:.7rem}
+.brand{margin-right:auto}.top-actions{margin-left:auto;display:flex;align-items:center;gap:.7rem}
 .gh-link{color:var(--muted);text-decoration:none;display:flex;align-items:center}
 .gh-link:hover{color:var(--text)}
 .icon-btn{background:none;border:none;cursor:pointer;color:var(--muted);padding:.25rem;display:flex;align-items:center}
@@ -29,11 +28,9 @@ body{background:var(--bg);color:var(--muted);font-family:-apple-system,BlinkMacS
 .btn svg{flex-shrink:0}
 .icon-btn:hover{color:var(--text)}
 @media(max-width:640px){.topbar{justify-content:flex-start;overflow-x:auto}.topbar a.nl.hide-m{display:none}}
-/* logo */
-.logo-row{display:flex;align-items:center;gap:.8rem;margin:4.5rem 0 2.2rem}
-.logo-mark{width:42px;height:42px;border-radius:11px;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-[data-theme="light"] .logo-mark{box-shadow:0 0 0 1px var(--border),0 4px 14px rgba(0,0,0,.08)}
-.logo-name{font-size:1.35rem;font-weight:600;color:var(--text);letter-spacing:-.01em}
+/* brand */
+.brand{font-size:1.05rem;font-weight:700;color:var(--text);letter-spacing:-.01em;text-decoration:none}
+.tagline-title{margin-top:4.5rem}
 /* typewriter */
 .tagline-title{font-size:1.3rem;font-weight:600;color:var(--text);margin-bottom:1.2rem;letter-spacing:-.01em}
 /* prose */
@@ -55,6 +52,24 @@ code{font-family:'Iosevka',ui-monospace,SFMono-Regular,Menlo,monospace;font-size
 .feat-list li::before{content:"–";position:absolute;left:0;color:var(--faint)}
 .feat-list b{color:var(--text);font-weight:600}
 /* quickstart box */
+/* command palette */
+.cmdk-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(3px);z-index:200;display:none}
+[data-theme="light"] .cmdk-backdrop{background:rgba(0,0,0,.2)}
+.cmdk-backdrop.open{display:block}
+.cmdk{position:fixed;z-index:201;top:12vh;left:50%;transform:translateX(-50%);width:min(560px,calc(100vw - 2rem));background:var(--bg);border:1px solid var(--border);border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.55);display:none;overflow:hidden}
+.cmdk.open{display:block;animation:cmdkIn .12s ease-out}
+@keyframes cmdkIn{from{opacity:0;transform:translateX(-50%) translateY(-6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.cmdk-input{width:100%;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);font:inherit;font-size:.95rem;padding:.95rem 1.1rem;outline:none}
+.cmdk-input::placeholder{color:var(--faint)}
+.cmdk-list{list-style:none;margin:0;padding:.4rem;max-height:52vh;overflow-y:auto}
+.cmdk-list li{margin:0}
+.cmdk-item{display:flex;align-items:center;gap:.6rem;padding:.55rem .7rem;border-radius:8px;color:var(--muted);cursor:pointer;font-size:.9rem}
+.cmdk-item .cmdk-kind{font-size:.72rem;color:var(--faint);margin-left:auto;white-space:nowrap;font-family:'Iosevka',ui-monospace,monospace}
+.cmdk-item[aria-selected="true"]{background:var(--code-bg);color:var(--text)}
+.cmdk-item mark{background:transparent;color:var(--text);font-weight:600}
+.cmdk-empty{padding:1rem 1.1rem;color:var(--faint);font-size:.88rem}
+.cmdk-hint{border-top:1px solid var(--border);padding:.5rem 1.1rem;display:flex;gap:1rem;font-size:.72rem;color:var(--faint)}
+.cmdk-hint kbd{border:1px solid var(--border);border-radius:4px;padding:0 .3rem;font-family:'Iosevka',ui-monospace,monospace}
 .cmd-box{background:var(--code-bg);border:1px solid var(--border);border-radius:12px;padding:1rem 1.2rem;font-family:'Iosevka',ui-monospace,Menlo,monospace;font-size:.86rem;line-height:1.9;margin-top:1rem;overflow-x:auto;white-space:pre}
 .cmd-box .c{color:var(--faint)} .cmd-box .p{color:#8b5cf6}
 /* faq */
@@ -101,6 +116,7 @@ html.traverse .prose{animation:vt-doc-back .4s cubic-bezier(.3,.7,.3,1) both}
 </head>
 <body>
 <div class="topbar">
+<a class="brand" href="#">apollo</a>
 <a class="nl hide-m" href="#docs">Docs</a>
 <a class="nl hide-m" href="#tools">Tools</a>
 <a class="nl hide-m" href="#faq">FAQ</a>
@@ -114,11 +130,6 @@ html.traverse .prose{animation:vt-doc-back .4s cubic-bezier(.3,.7,.3,1) both}
 </div>
 
 <div class="wrap">
-<div class="logo-row rise">
-<div class="logo-mark"><svg width="26" height="26" viewBox="0 0 48 48" aria-hidden="true"><ellipse cx="24" cy="25" rx="16" ry="6.5" fill="none" stroke="#7c3aed" stroke-width="2.4" transform="rotate(-20 24 25)"/><circle cx="24" cy="25" r="8" fill="#c4b5fd"/><circle cx="21.5" cy="22.5" r="2.2" fill="#7c3aed"/></svg></div>
-<div class="logo-name">apollo</div>
-</div>
-
 <h1 class="tagline-title rise rise-1">An AI pair-programmer in your terminal.</h1>
 
 <p class="lede rise rise-2">Free and open source CLI coding assistant written in <a href="https://go.dev" target="_blank" rel="noreferrer">Go</a>, powered by MiniMax-M2.5 via the <a href="https://opencode.ai" target="_blank" rel="noreferrer">opencode.ai</a> API. Set <code>OPENCODE_API_KEY</code>, run <code>apollo</code>, and start delegating — <a href="quickstart/">get going in a minute</a>.</p>
@@ -148,7 +159,7 @@ View on GitHub</a>
 <ul class="feat-list">
 <li><b>Install &amp; run</b>: <code>go install github.com/HimanshuSardana/apollo@latest</code>, set <code>OPENCODE_API_KEY</code>, run <code>apollo</code> — <a href="quickstart/">full quickstart</a></li>
 {{ range .Posts }}
-<li><b>{{ .Title }}</b>{{ range .Tags }} · {{ . }}{{ end }} — <a href="{{ .Slug }}/">read</a></li>
+<li data-cmd-item data-title="{{ .Title }}" data-tags="{{ range .Tags }}{{ . }} {{ end }}" data-href="{{ .Slug }}/"><b>{{ .Title }}</b>{{ range .Tags }} · {{ . }}{{ end }} — <a href="{{ .Slug }}/">read</a></li>
 {{ end }}
 </ul>
 
@@ -246,6 +257,140 @@ window.addEventListener('pagereveal', function(e){
 });
 document.addEventListener('DOMContentLoaded', markNav);
 
+</script>
+
+<div class="cmdk-backdrop" id="cmdk-backdrop"></div>
+<div class="cmdk" id="cmdk" role="dialog" aria-modal="true" aria-label="Search">
+<input class="cmdk-input" id="cmdk-input" type="text" placeholder="Search pages…" autocomplete="off" spellcheck="false" />
+<ul class="cmdk-list" id="cmdk-list" role="listbox"></ul>
+<div class="cmdk-hint"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span><span style="margin-left:auto">sections appear on a page</span></div>
+</div>
+
+<script>
+// ── command palette ───────────────────────────────────────────────────────────
+window.__cmdkSections = [];   // progress: .content page injects its headings
+(function(){
+  var items = [];
+  document.querySelectorAll('[data-cmd-item]').forEach(function(el){
+    items.push({
+      title: el.dataset.title,
+      href: el.dataset.href,
+      kind: el.dataset.tags ? el.dataset.tags.trim().split(/\s+/)[0] : 'page',
+      kindLabel: 'page'
+    });
+  });
+  window.__cmdkItems = items;
+})();
+</script>
+<script>
+// ── command palette core (shared by home + content pages) ────────────────────
+// Page boot scripts must set, BEFORE this runs:
+//   window.__cmdkItems    = [{title, href, kindLabel}]   pages (may be [])
+//   window.__cmdkSections = [{title, href, kindLabel}]   current-page sections
+//   window.__cmdkBase     = '../'                         (content pages only;
+//                                                          pages are fetched from the home page)
+(function(){
+  var backdrop = document.getElementById('cmdk-backdrop');
+  var palette  = document.getElementById('cmdk');
+  var input    = document.getElementById('cmdk-input');
+  var list     = document.getElementById('cmdk-list');
+  if (!backdrop || !palette || !input || !list) return;
+
+  var pages    = (window.__cmdkItems || []).slice();
+  var sections = (window.__cmdkSections || []).slice();
+  var base     = window.__cmdkBase || '';
+  var sel = 0, current = [], fetched = false;
+
+  // subsequence fuzzy match; returns {score, idx} or null
+  function fuzzy(q, text){
+    q = q.toLowerCase(); text = text.toLowerCase();
+    var qi = 0, idx = [], score = 0, last = -1;
+    for (var i = 0; i < text.length && qi < q.length; i++) {
+      if (text[i] === q[qi]) { idx.push(i); score += (last === -1 ? i * 2 : i - last - 1); last = i; qi++; }
+    }
+    return qi === q.length ? { score: score, idx: idx } : null;
+  }
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(title, idx){
+    var out = '', at = 0;
+    idx.forEach(function(i){ out += esc(title.slice(at, i)) + '<mark>' + esc(title[i]) + '</mark>'; at = i + 1; });
+    return out + esc(title.slice(at));
+  }
+
+  function all(){
+    return sections.map(function(s){ s._kind = 'section'; return s; })
+      .concat(pages.map(function(p){ p._kind = 'page'; return p; }));
+  }
+  function render(q){
+    q = (q || '').trim();
+    var pool = all();
+    current = !q ? pool : pool.map(function(it){
+      var m = fuzzy(q, it.title);
+      return m ? { it: it, score: m.score - (it._kind === 'section' ? 50 : 0), idx: m.idx } : null;
+    }).filter(Boolean).sort(function(a, b){ return a.score - b.score; }).map(function(r){ r.it._idx = r.idx; return r.it; });
+    if (sel >= current.length) sel = 0;
+    if (!current.length) { list.innerHTML = '<li class="cmdk-empty">No matches for &ldquo;' + esc(q) + '&rdquo;</li>'; return; }
+    list.innerHTML = current.map(function(it, i){
+      var label = it._kind === 'section' ? 'section' : (it.kindLabel || 'page');
+      var title = it._idx ? mark(it.title, it._idx) : esc(it.title);
+      return '<li><div class="cmdk-item" role="option" aria-selected="' + (i === sel) + '" data-i="' + i + '">' +
+        '<span>' + title + '</span><span class="cmdk-kind">' + esc(label) + '</span></div></li>';
+    }).join('');
+  }
+  function open(){
+    backdrop.classList.add('open'); palette.classList.add('open');
+    input.value = ''; sel = 0; render('');
+    setTimeout(function(){ input.focus(); }, 0);
+    maybeFetch();
+  }
+  function close(){
+    backdrop.classList.remove('open'); palette.classList.remove('open');
+    input.blur();
+  }
+  function isOpen(){ return palette.classList.contains('open'); }
+  function go(){
+    var it = current[sel];
+    if (!it) return;
+    close();
+    window.location.href = it.href;
+  }
+  function maybeFetch(){
+    if (fetched || !base) return;   // note: don't test pages.length -- boot seeds a placeholder
+    fetched = true;
+    fetch(base, { credentials: 'same-origin' }).then(function(r){ return r.text(); }).then(function(html){
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      doc.querySelectorAll('[data-cmd-item]').forEach(function(el){
+        pages.push({ title: el.dataset.title, href: base + el.dataset.href, kindLabel: 'page' });
+      });
+      if (isOpen()) render(input.value);
+    }).catch(function(){ /* sections still work; home link below covers pages */ });
+  }
+
+  var opener = document.getElementById('cmdk-open');
+  if (opener) opener.addEventListener('click', open);
+  backdrop.addEventListener('click', close);
+  input.addEventListener('input', function(){ sel = 0; render(input.value); });
+  input.addEventListener('keydown', function(e){
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(sel + 1, current.length - 1); render(input.value); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(sel - 1, 0); render(input.value); }
+    else if (e.key === 'Enter') { go(); }
+    else if (e.key === 'Escape') { close(); }
+  });
+  list.addEventListener('click', function(e){
+    var row = e.target.closest('.cmdk-item');
+    if (row) { sel = parseInt(row.dataset.i, 10) || 0; go(); }
+  });
+  // keep aria-selected visible
+  new MutationObserver(function(){
+    var el = list.querySelector('[aria-selected="true"]');
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }).observe(list, { childList: true, subtree: true, attributes: true });
+
+  document.addEventListener('keydown', function(e){
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); isOpen() ? close() : open(); }
+    else if (e.key === 'Escape' && isOpen()) { close(); }
+  });
+})();
 </script>
 
 <script>
