@@ -86,6 +86,17 @@ code[class*=language-]{font-family:'Iosevka',ui-monospace,Menlo,monospace}
 .island-menu a{display:block;color:#9a9aa2;text-decoration:none;font-size:.82rem;line-height:1.35;padding:.5rem .7rem;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:background .15s,color .15s}
 .island-menu a:hover{background:rgba(255,255,255,.08);color:#f5f5f6}
 .island-menu a.active{background:rgba(255,255,255,.1);color:#f5f5f6}
+/* dynamic island in light mode: follow the theme instead of staying dark */
+[data-theme="light"] .island-inner{background:#fff;box-shadow:0 10px 40px rgba(0,0,0,.16),inset 0 0 0 1px rgba(0,0,0,.08)}
+[data-theme="light"] .island.open .island-inner{box-shadow:0 18px 55px rgba(0,0,0,.22),inset 0 0 0 1px rgba(0,0,0,.1)}
+[data-theme="light"] .island-head{color:#111}
+[data-theme="light"] .island-ring .ring-bg{stroke:rgba(0,0,0,.12)}
+[data-theme="light"] .island-ring .ring-fg{stroke:#111}
+[data-theme="light"] .island-chev{color:#a1a1aa}
+[data-theme="light"] .island-head:hover .island-chev{color:#111}
+[data-theme="light"] .island-menu a{color:#52525b}
+[data-theme="light"] .island-menu a:hover{background:rgba(0,0,0,.05);color:#111}
+[data-theme="light"] .island-menu a.active{background:rgba(0,0,0,.07);color:#111}
 /* command palette */
 .cmdk-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(3px);z-index:200;display:none}
 [data-theme="light"] .cmdk-backdrop{background:rgba(0,0,0,.2)}
