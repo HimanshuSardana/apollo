@@ -1,12 +1,7 @@
 mod client;
 
-use std::io::IsTerminal;
+use std::io::Write;
 
-use crossterm::{
-    cursor::{MoveDown, MoveToColumn, MoveUp},
-    execute,
-    terminal::{Clear, ClearType},
-};
 use owo_colors::OwoColorize;
 use rustyline::{DefaultEditor, error::ReadlineError};
 
@@ -29,34 +24,6 @@ fn read_prompt() -> String {
     format!("{} ", "›".bold().cyan())
 }
 
-fn term_width() -> usize {
-    crossterm::terminal::size()
-        .map(|(w, _)| w as usize)
-        .unwrap_or(60)
-        .max(20)
-}
-
-fn print_bar() {
-    println!("{}", "─".repeat(term_width()).dimmed());
-}
-
-fn step_below_bar() {
-    let mut out = std::io::stdout();
-    let _ = execute!(out, MoveToColumn(0));
-    println!();
-}
-
-fn drop_below_box() {
-    let mut out = std::io::stdout();
-    let _ = execute!(out, MoveDown(1), MoveToColumn(0));
-    println!();
-}
-
-fn clear_status_line() {
-    let mut out = std::io::stdout();
-    let _ = execute!(out, MoveToColumn(0), Clear(ClearType::CurrentLine));
-}
-
 async fn run() -> Result<(), client::ApiError> {
     let client = Client::new()?;
     print_banner();
@@ -70,45 +37,13 @@ async fn run() -> Result<(), client::ApiError> {
         let _ = editor.load_history(p);
     }
 
-    let interactive = std::io::stdout().is_terminal();
     loop {
-        print_bar();
-        if interactive {
-            println!();
-            print_bar();
-            let mut out = std::io::stdout();
-            let _ = execute!(out, MoveUp(2), MoveToColumn(0));
-        }
         let line = tokio::task::block_in_place(|| editor.readline(&read_prompt()));
         let line = match line {
-            Ok(l) => {
-                if interactive {
-                    step_below_bar();
-                } else {
-                    print_bar();
-                }
-                l
-            }
-            Err(ReadlineError::Interrupted) => {
-                if interactive {
-                    drop_below_box();
-                } else {
-                    print_bar();
-                }
-                continue;
-            }
-            Err(ReadlineError::Eof) => {
-                if interactive {
-                    drop_below_box();
-                }
-                break;
-            }
-            Err(e) => {
-                if interactive {
-                    drop_below_box();
-                }
-                return Err(client::ApiError(format!("failed to read input: {e}")));
-            }
+            Ok(l) => l,
+            Err(ReadlineError::Interrupted) => continue,
+            Err(ReadlineError::Eof) => break,
+            Err(e) => return Err(client::ApiError(format!("failed to read input: {e}"))),
         };
         let input = line.trim();
         if !input.is_empty() {
@@ -121,7 +56,7 @@ async fn run() -> Result<(), client::ApiError> {
             "/exit" | "/quit" | "exit" | "quit" => break,
             "/clear" => {
                 history.clear();
-                println!("  {}", "context cleared".dimmed());
+                println!("{}", "context cleared".dimmed());
                 continue;
             }
             _ => {}
@@ -129,34 +64,46 @@ async fn run() -> Result<(), client::ApiError> {
 
         history.push(ChatMessage::user(input));
 
-        println!("  {}", "thinking…".dimmed().italic());
+        let mut thought_open = false;
+        let mut content_started = false;
+        let mut thought_at_line_start = true;
 
-        match client.complete(&history).await {
-            Ok((content, reasoning)) => {
-                history.push(ChatMessage::assistant(
-                    content.clone(),
-                    reasoning.clone(),
-                ));
-                clear_status_line();
-                println!("{} {}", "●".magenta(), "apollo".bold().magenta());
-                if let Some(r) = reasoning {
-                    println!("  {}", "thought:".dimmed());
-                    for rl in r.lines() {
-                        println!("  {}", rl.dimmed());
+        let result = client
+            .complete_stream(&history, |ev| {
+                match ev {
+                    client::StreamEvent::Reasoning(t) => {
+                        thought_open = true;
+                        thought_at_line_start = t.ends_with('\n');
+                        print!("{}", t.dimmed());
+                        let _ = std::io::stdout().flush();
+                    }
+                    client::StreamEvent::Content(t) => {
+                        if !content_started {
+                            content_started = true;
+                            if thought_open && !thought_at_line_start {
+                                println!();
+                            }
+                        }
+                        print!("{t}");
+                        let _ = std::io::stdout().flush();
                     }
                 }
-                if content.trim().is_empty() {
-                    println!("  {}", "(empty reply — model returned only reasoning)".yellow());
-                } else {
-                    for cl in content.lines() {
-                        println!("  {cl}");
-                    }
+            })
+            .await;
+
+        match result {
+            Ok((content, reasoning)) => {
+                let empty = content.trim().is_empty();
+                history.push(ChatMessage::assistant(content, reasoning));
+                println!();
+                if empty {
+                    println!("{}", "(empty reply — model returned only reasoning)".yellow());
                 }
                 println!();
             }
             Err(e) => {
-                clear_status_line();
-                eprintln!("  {} {}", "error:".bold().red(), e.to_string().red());
+                println!();
+                eprintln!("{} {}", "error:".bold().red(), e.to_string().red());
                 println!();
             }
         }

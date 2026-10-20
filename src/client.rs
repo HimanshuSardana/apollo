@@ -36,8 +36,14 @@ struct ChatRequest<'a> {
     stream: bool,
 }
 
+#[derive(Debug)]
+pub enum StreamEvent {
+    Reasoning(String),
+    Content(String),
+}
+
 #[derive(Debug, Deserialize)]
-struct AssistantMessage {
+struct StreamDelta {
     #[serde(default)]
     content: Option<serde_json::Value>,
     #[serde(default)]
@@ -45,14 +51,14 @@ struct AssistantMessage {
 }
 
 #[derive(Debug, Deserialize)]
-struct Choice {
-    message: AssistantMessage,
+struct StreamChoice {
+    delta: Option<StreamDelta>,
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatResponse {
+struct StreamChunk {
     #[serde(default)]
-    choices: Vec<Choice>,
+    choices: Vec<StreamChoice>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,6 +73,66 @@ enum ErrorBody {
     Detailed { message: Option<String> },
 }
 
+fn error_detail(text: &str) -> String {
+    serde_json::from_str::<ErrorEnvelope>(text)
+        .ok()
+        .and_then(|env| env.error)
+        .map(|b| match b {
+            ErrorBody::Text(t) => t,
+            ErrorBody::Detailed { message } => {
+                message.unwrap_or_else(|| "unknown error".to_string())
+            }
+        })
+        .unwrap_or_else(|| text.trim().to_string())
+}
+
+fn handle_sse_line(
+    line: &[u8],
+    on_event: &mut impl FnMut(StreamEvent),
+    content: &mut String,
+    reasoning: &mut String,
+) -> Result<bool, ApiError> {
+    let line = String::from_utf8_lossy(line);
+    let line = line.trim();
+    if line.is_empty() || line.starts_with(':') {
+        return Ok(false);
+    }
+    let payload = line.strip_prefix("data:").unwrap_or(line).trim();
+    if payload == "[DONE]" {
+        return Ok(true);
+    }
+    let value: serde_json::Value = serde_json::from_str(payload)
+        .map_err(|e| ApiError(format!("failed to parse stream chunk: {e}")))?;
+    if value.get("error").is_some() {
+        return Err(ApiError(format!(
+            "api error (stream): {}",
+            error_detail(payload)
+        )));
+    }
+    let chunk: StreamChunk = serde_json::from_value(value)
+        .map_err(|e| ApiError(format!("failed to parse stream chunk: {e}")))?;
+    if let Some(delta) = chunk.choices.first().and_then(|c| c.delta.as_ref()) {
+        if let Some(text) = delta
+            .reasoning_content
+            .as_ref()
+            .map(value_to_string)
+            .filter(|s| !s.is_empty())
+        {
+            reasoning.push_str(&text);
+            on_event(StreamEvent::Reasoning(text));
+        }
+        if let Some(text) = delta
+            .content
+            .as_ref()
+            .map(value_to_string)
+            .filter(|s| !s.is_empty())
+        {
+            content.push_str(&text);
+            on_event(StreamEvent::Content(text));
+        }
+    }
+    Ok(false)
+}
 fn value_to_string(v: &serde_json::Value) -> String {
     match v {
         serde_json::Value::Null => String::new(),
@@ -104,10 +170,9 @@ pub struct Client {
 
 impl Client {
     pub fn new() -> Result<Self, ApiError> {
-        let api_key = std::env::var("OPENCODE_API_KEY")
-            .map_err(|_| {
-                ApiError("OPENCODE_API_KEY is not set (export it before running apollo)".to_string())
-            })?;
+        let api_key = std::env::var("OPENCODE_API_KEY").map_err(|_| {
+            ApiError("OPENCODE_API_KEY is not set (export it before running apollo)".to_string())
+        })?;
         if api_key.trim().is_empty() {
             return Err(ApiError("OPENCODE_API_KEY is empty".to_string()));
         }
@@ -118,65 +183,86 @@ impl Client {
         })
     }
 
-    pub async fn complete(
+    pub async fn complete_stream(
         &self,
         history: &[ChatMessage],
+        mut on_event: impl FnMut(StreamEvent),
+    ) -> Result<(String, Option<String>), ApiError> {
+        Self::complete_stream_inner(
+            &self.http,
+            &self.api_key,
+            &self.session_id,
+            history,
+            &mut on_event,
+        )
+        .await
+    }
+
+    async fn complete_stream_inner(
+        http: &reqwest::Client,
+        api_key: &str,
+        session_id: &str,
+        history: &[ChatMessage],
+        on_event: &mut impl FnMut(StreamEvent),
     ) -> Result<(String, Option<String>), ApiError> {
         let body = ChatRequest {
             model: MODEL,
             messages: history,
-            stream: false,
+            stream: true,
         };
 
-        let res = self
-            .http
+        let res = http
             .post(ENDPOINT)
-            .bearer_auth(&self.api_key)
-            .header("x-opencode-session", &self.session_id)
+            .bearer_auth(api_key)
+            .header("x-opencode-session", session_id)
             .json(&body)
             .send()
             .await
             .map_err(|e| ApiError(format!("request failed: {e}")))?;
 
         let status = res.status();
-        let text = res
-            .text()
-            .await
-            .map_err(|e| ApiError(format!("failed to read response body: {e}")))?;
-
         if !status.is_success() {
-            let detail = serde_json::from_str::<ErrorEnvelope>(&text)
-                .ok()
-                .and_then(|env| env.error)
-                .map(|b| match b {
-                    ErrorBody::Text(t) => t,
-                    ErrorBody::Detailed { message } => {
-                        message.unwrap_or_else(|| "unknown error".to_string())
-                    }
-                })
-                .unwrap_or_else(|| text.trim().to_string());
-            return Err(ApiError(format!("api error (http {status}): {detail}")));
+            let text = res.text().await.unwrap_or_default();
+            return Err(ApiError(format!(
+                "api error (http {status}): {}",
+                error_detail(&text)
+            )));
         }
 
-        let parsed: ChatResponse = serde_json::from_str(&text)
-            .map_err(|e| ApiError(format!("failed to parse response: {e}\nbody: {text}")))?;
-        let message = parsed
-            .choices
-            .first()
-            .map(|c| &c.message)
-            .ok_or_else(|| ApiError("api returned no choices".to_string()))?;
+        let mut res = res;
+        let mut content = String::new();
+        let mut reasoning = String::new();
+        let mut buf: Vec<u8> = Vec::new();
+        let mut done = false;
+        while !done {
+            match res
+                .chunk()
+                .await
+                .map_err(|e| ApiError(format!("stream read failed: {e}")))?
+            {
+                Some(bytes) => {
+                    buf.extend_from_slice(&bytes);
+                    while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                        let line: Vec<u8> = buf.drain(..=pos).collect();
+                        done = handle_sse_line(&line, on_event, &mut content, &mut reasoning)?;
+                        if done {
+                            break;
+                        }
+                    }
+                }
+                None => break,
+            }
+        }
+        if !done && !buf.is_empty() {
+            let tail: Vec<u8> = std::mem::take(&mut buf);
+            handle_sse_line(&tail, on_event, &mut content, &mut reasoning)?;
+        }
 
-        let content = message
-            .content
-            .as_ref()
-            .map(value_to_string)
-            .unwrap_or_default();
-        let reasoning = message
-            .reasoning_content
-            .as_ref()
-            .map(value_to_string)
-            .filter(|s| !s.trim().is_empty());
-
+        let reasoning = if reasoning.trim().is_empty() {
+            None
+        } else {
+            Some(reasoning)
+        };
         Ok((content, reasoning))
     }
 }
