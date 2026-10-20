@@ -32,6 +32,26 @@ impl Lang {
         }
     }
 
+    pub fn from_path(path: &str) -> Self {
+        let ext = std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        match ext.as_str() {
+            "rs" => Lang::Rust,
+            "py" | "pyi" => Lang::Python,
+            "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => Lang::JavaScript,
+            "json" => Lang::Json,
+            "sh" | "bash" | "zsh" | "fish" => Lang::Shell,
+            "go" => Lang::Go,
+            "c" | "h" | "cc" | "cpp" | "hpp" | "java" => Lang::C,
+            "toml" => Lang::Toml,
+            "md" | "markdown" | "txt" | "log" | "" => Lang::Plain,
+            _ => Lang::Other,
+        }
+    }
+
     fn line_comments(self) -> &'static [&'static str] {
         match self {
             Lang::Plain => &[],

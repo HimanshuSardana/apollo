@@ -4,27 +4,78 @@ pub const ENDPOINT: &str = "https://opencode.ai/inference/go/openai/v1/chat/comp
 pub const MODEL: &str = "deepseek-v4.1-flash";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionCall {
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub function: FunctionCall,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
-    pub content: String,
+    pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl ChatMessage {
     pub fn user(content: impl Into<String>) -> Self {
         Self {
             role: "user".to_string(),
-            content: content.into(),
+            content: Some(content.into()),
             reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
         }
     }
 
     pub fn assistant(content: impl Into<String>, reasoning: Option<String>) -> Self {
         Self {
             role: "assistant".to_string(),
-            content: content.into(),
+            content: Some(content.into()),
             reasoning_content: reasoning,
+            tool_calls: None,
+            tool_call_id: None,
+        }
+    }
+
+    pub fn assistant_tool_calls(
+        content: String,
+        reasoning: Option<String>,
+        calls: Vec<ToolCall>,
+    ) -> Self {
+        let content = if content.trim().is_empty() {
+            None
+        } else {
+            Some(content)
+        };
+        Self {
+            role: "assistant".to_string(),
+            content,
+            reasoning_content: reasoning,
+            tool_calls: Some(calls),
+            tool_call_id: None,
+        }
+    }
+
+    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: "tool".to_string(),
+            content: Some(content.into()),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.into()),
         }
     }
 }
@@ -34,20 +85,36 @@ struct ChatRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage],
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<&'a serde_json::Value>,
 }
 
-#[derive(Debug)]
-pub enum StreamEvent {
-    Reasoning(String),
-    Content(String),
+#[derive(Debug, Default, Deserialize)]
+struct DeltaFunction {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+struct DeltaToolCall {
+    #[serde(default)]
+    index: Option<usize>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<DeltaFunction>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 struct StreamDelta {
     #[serde(default)]
     content: Option<serde_json::Value>,
     #[serde(default)]
     reasoning_content: Option<serde_json::Value>,
+    #[serde(default)]
+    tool_calls: Option<Vec<DeltaToolCall>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,24 +140,86 @@ enum ErrorBody {
     Detailed { message: Option<String> },
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum StreamEvent<'a> {
+    Reasoning(&'a str),
+    Content(&'a str),
+}
+
+pub struct Completion {
+    pub content: String,
+    pub reasoning: Option<String>,
+    pub tool_calls: Vec<ToolCall>,
+}
+
+#[derive(Default)]
+struct PartialCall {
+    id: String,
+    name: String,
+    args: String,
+}
+
+#[derive(Default)]
+struct Acc {
+    content: String,
+    reasoning: String,
+    calls: Vec<PartialCall>,
+}
+
 fn error_detail(text: &str) -> String {
     serde_json::from_str::<ErrorEnvelope>(text)
         .ok()
         .and_then(|env| env.error)
         .map(|b| match b {
             ErrorBody::Text(t) => t,
-            ErrorBody::Detailed { message } => {
-                message.unwrap_or_else(|| "unknown error".to_string())
-            }
+            ErrorBody::Detailed { message } => message.unwrap_or_else(|| "unknown error".to_string()),
         })
         .unwrap_or_else(|| text.trim().to_string())
+}
+
+fn value_to_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| {
+                p.get("text")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| p.as_str().map(|s| s.to_string()))
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+        other => other.to_string(),
+    }
+}
+
+fn absorb_tool_calls(acc: &mut Acc, deltas: Vec<DeltaToolCall>) {
+    for d in deltas {
+        let idx = d.index.unwrap_or(0);
+        while acc.calls.len() <= idx {
+            acc.calls.push(PartialCall::default());
+        }
+        let slot = &mut acc.calls[idx];
+        if let Some(id) = d.id.filter(|s| !s.is_empty()) {
+            slot.id = id;
+        }
+        if let Some(f) = d.function {
+            if let Some(name) = f.name.filter(|s| !s.is_empty()) {
+                slot.name.push_str(&name);
+            }
+            if let Some(args) = f.arguments {
+                slot.args.push_str(&args);
+            }
+        }
+    }
 }
 
 fn handle_sse_line(
     line: &[u8],
     on_event: &mut impl FnMut(StreamEvent),
-    content: &mut String,
-    reasoning: &mut String,
+    acc: &mut Acc,
 ) -> Result<bool, ApiError> {
     let line = String::from_utf8_lossy(line);
     let line = line.trim();
@@ -118,8 +247,8 @@ fn handle_sse_line(
             .map(value_to_string)
             .filter(|s| !s.is_empty())
         {
-            reasoning.push_str(&text);
-            on_event(StreamEvent::Reasoning(text));
+            acc.reasoning.push_str(&text);
+            on_event(StreamEvent::Reasoning(&text));
         }
         if let Some(text) = delta
             .content
@@ -127,27 +256,24 @@ fn handle_sse_line(
             .map(value_to_string)
             .filter(|s| !s.is_empty())
         {
-            content.push_str(&text);
-            on_event(StreamEvent::Content(text));
+            acc.content.push_str(&text);
+            on_event(StreamEvent::Content(&text));
+        }
+        if let Some(calls) = delta.tool_calls.as_ref() {
+            absorb_tool_calls(acc, calls.iter().map(clone_delta).collect());
         }
     }
     Ok(false)
 }
-fn value_to_string(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::Null => String::new(),
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Array(parts) => parts
-            .iter()
-            .filter_map(|p| {
-                p.get("text")
-                    .and_then(|t| t.as_str())
-                    .map(|s| s.to_string())
-                    .or_else(|| p.as_str().map(|s| s.to_string()))
-            })
-            .collect::<Vec<_>>()
-            .join(""),
-        other => other.to_string(),
+
+fn clone_delta(d: &DeltaToolCall) -> DeltaToolCall {
+    DeltaToolCall {
+        index: d.index,
+        id: d.id.clone(),
+        function: d.function.as_ref().map(|f| DeltaFunction {
+            name: f.name.clone(),
+            arguments: f.arguments.clone(),
+        }),
     }
 }
 
@@ -186,35 +312,21 @@ impl Client {
     pub async fn complete_stream(
         &self,
         history: &[ChatMessage],
+        tools: Option<&serde_json::Value>,
         mut on_event: impl FnMut(StreamEvent),
-    ) -> Result<(String, Option<String>), ApiError> {
-        Self::complete_stream_inner(
-            &self.http,
-            &self.api_key,
-            &self.session_id,
-            history,
-            &mut on_event,
-        )
-        .await
-    }
-
-    async fn complete_stream_inner(
-        http: &reqwest::Client,
-        api_key: &str,
-        session_id: &str,
-        history: &[ChatMessage],
-        on_event: &mut impl FnMut(StreamEvent),
-    ) -> Result<(String, Option<String>), ApiError> {
+    ) -> Result<Completion, ApiError> {
         let body = ChatRequest {
             model: MODEL,
             messages: history,
             stream: true,
+            tools,
         };
 
-        let res = http
+        let res = self
+            .http
             .post(ENDPOINT)
-            .bearer_auth(api_key)
-            .header("x-opencode-session", session_id)
+            .bearer_auth(&self.api_key)
+            .header("x-opencode-session", &self.session_id)
             .json(&body)
             .send()
             .await
@@ -230,8 +342,7 @@ impl Client {
         }
 
         let mut res = res;
-        let mut content = String::new();
-        let mut reasoning = String::new();
+        let mut acc = Acc::default();
         let mut buf: Vec<u8> = Vec::new();
         let mut done = false;
         while !done {
@@ -244,7 +355,7 @@ impl Client {
                     buf.extend_from_slice(&bytes);
                     while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
                         let line: Vec<u8> = buf.drain(..=pos).collect();
-                        done = handle_sse_line(&line, on_event, &mut content, &mut reasoning)?;
+                        done = handle_sse_line(&line, &mut on_event, &mut acc)?;
                         if done {
                             break;
                         }
@@ -255,14 +366,42 @@ impl Client {
         }
         if !done && !buf.is_empty() {
             let tail: Vec<u8> = std::mem::take(&mut buf);
-            handle_sse_line(&tail, on_event, &mut content, &mut reasoning)?;
+            handle_sse_line(&tail, &mut on_event, &mut acc)?;
         }
 
-        let reasoning = if reasoning.trim().is_empty() {
+        let tool_calls = acc
+            .calls
+            .into_iter()
+            .filter(|c| !c.name.is_empty())
+            .enumerate()
+            .map(|(i, c)| ToolCall {
+                id: if c.id.is_empty() {
+                    format!("call_{i}")
+                } else {
+                    c.id
+                },
+                kind: "function".to_string(),
+                function: FunctionCall {
+                    name: c.name,
+                    arguments: if c.args.trim().is_empty() {
+                        "{}".to_string()
+                    } else {
+                        c.args
+                    },
+                },
+            })
+            .collect();
+
+        let reasoning = if acc.reasoning.trim().is_empty() {
             None
         } else {
-            Some(reasoning)
+            Some(acc.reasoning)
         };
-        Ok((content, reasoning))
+
+        Ok(Completion {
+            content: acc.content,
+            reasoning,
+            tool_calls,
+        })
     }
 }
