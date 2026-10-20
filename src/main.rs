@@ -1,4 +1,6 @@
 mod client;
+mod highlight;
+mod markdown;
 
 use std::io::Write;
 
@@ -6,6 +8,7 @@ use owo_colors::OwoColorize;
 use rustyline::{DefaultEditor, error::ReadlineError};
 
 use client::{ChatMessage, Client};
+use markdown::StreamRenderer;
 
 fn print_banner() {
     println!(
@@ -67,6 +70,7 @@ async fn run() -> Result<(), client::ApiError> {
         let mut thought_open = false;
         let mut content_started = false;
         let mut thought_at_line_start = true;
+        let mut renderer = StreamRenderer::new();
 
         let result = client
             .complete_stream(&history, |ev| {
@@ -84,7 +88,7 @@ async fn run() -> Result<(), client::ApiError> {
                                 println!();
                             }
                         }
-                        print!("{t}");
+                        print!("{}", renderer.push(&t));
                         let _ = std::io::stdout().flush();
                     }
                 }
@@ -95,6 +99,7 @@ async fn run() -> Result<(), client::ApiError> {
             Ok((content, reasoning)) => {
                 let empty = content.trim().is_empty();
                 history.push(ChatMessage::assistant(content, reasoning));
+                print!("{}", renderer.flush());
                 println!();
                 if empty {
                     println!("{}", "(empty reply — model returned only reasoning)".yellow());
