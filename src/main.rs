@@ -1,15 +1,19 @@
 mod client;
+mod completion;
 mod highlight;
 mod markdown;
+mod models;
+mod picker;
 mod tools;
 
 use std::io::Write;
 
 use owo_colors::OwoColorize;
-use rustyline::{DefaultEditor, error::ReadlineError};
+use rustyline::{Editor, error::ReadlineError, history::DefaultHistory};
 use unicode_width::UnicodeWidthStr;
 
 use client::{ChatMessage, Client};
+use completion::PathCompleter;
 use highlight::Lang;
 use markdown::StreamRenderer;
 use tools::Display;
@@ -263,17 +267,97 @@ fn render_tool_result(display: &Display) {
     }
 }
 
-fn print_banner() {
+fn print_banner(client: &Client) {
+    let effort = client.effort().unwrap_or("auto");
     println!(
         "{} {}",
         "apollo".bold().cyan(),
-        format!("— {} via opencode-go", client::MODEL).dimmed()
+        format!(
+            "— {} [{effort}] via opencode-go",
+            models::display_name(client.model())
+        )
+        .dimmed()
     );
     println!(
         "  {}",
-        "type a message · /clear resets context · /exit quits".dimmed()
+        "type a message · /models /effort /clear /exit".dimmed()
     );
     println!();
+}
+
+fn pick_model(client: &mut Client) {
+    let items: Vec<picker::Item> = models::CATALOG
+        .iter()
+        .map(|m| picker::Item::new(m.name, m.id))
+        .collect();
+    let current = models::index_of(client.model()).unwrap_or(0);
+    match picker::pick("model", &items, current) {
+        Ok(Some(i)) => {
+            let picked = &models::CATALOG[i];
+            client.set_model(picked.id);
+            let reset = match client.effort() {
+                Some(e) if !picked.efforts.contains(&e) => {
+                    client.set_effort(None);
+                    true
+                }
+                _ => false,
+            };
+            if reset {
+                println!(
+                    "{}",
+                    format!("model → {} · effort reset to auto", picked.name).dimmed()
+                );
+            } else {
+                println!(
+                    "{}",
+                    format!("model → {} ({})", picked.name, picked.id).dimmed()
+                );
+            }
+        }
+        Ok(None) => {}
+        Err(e) => println!("{}", format!("picker: {e}").dimmed()),
+    }
+}
+
+fn effort_hint(level: &str) -> &'static str {
+    match level {
+        "auto" => "model default",
+        "off" => "no reasoning",
+        "low" => "fast",
+        "medium" => "balanced",
+        "high" => "deep",
+        "max" => "deepest",
+        _ => "",
+    }
+}
+
+fn pick_effort(client: &mut Client) {
+    let levels = models::efforts_for(client.model());
+    let mut items = vec![picker::Item::new("auto", effort_hint("auto"))];
+    for level in levels {
+        items.push(picker::Item::new(*level, effort_hint(level)));
+    }
+    let current = match client.effort() {
+        None => 0,
+        Some(e) => levels
+            .iter()
+            .position(|l| l == &e)
+            .map(|p| p + 1)
+            .unwrap_or(0),
+    };
+    match picker::pick("effort", &items, current) {
+        Ok(Some(0)) => {
+            client.set_effort(None);
+            println!("{}", "effort → auto".dimmed());
+        }
+        Ok(Some(i)) => {
+            let level = items[i].label.clone();
+            client.set_effort(Some(&level));
+            println!("{}", format!("effort → {level}").dimmed());
+        }
+        Ok(None) => {}
+        Err(e) => println!("{}", format!("picker: {e}").dimmed()),
+    }
 }
 
 fn read_prompt() -> String {
@@ -281,15 +365,16 @@ fn read_prompt() -> String {
 }
 
 async fn run() -> Result<(), client::ApiError> {
-    let client = Client::new()?;
+    let mut client = Client::new()?;
     let tool_defs = tools::definitions();
-    print_banner();
+    print_banner(&client);
 
     let mut history: Vec<ChatMessage> = Vec::new();
 
     let history_path = std::env::var("HOME").map(|h| format!("{h}/.apollo_history")).ok();
-    let mut editor = DefaultEditor::new()
-        .map_err(|e| client::ApiError(format!("failed to init input: {e}")))?;
+    let mut editor: Editor<PathCompleter, DefaultHistory> =
+        Editor::with_default(completion::config())
+            .map_err(|e| client::ApiError(format!("failed to init input: {e}")))?;
     if let Some(p) = &history_path {
         let _ = editor.load_history(p);
     }
@@ -311,6 +396,14 @@ async fn run() -> Result<(), client::ApiError> {
         }
         match input {
             "/exit" | "/quit" | "exit" | "quit" => break,
+            "/models" | "/model" => {
+                tokio::task::block_in_place(|| pick_model(&mut client));
+                continue;
+            }
+            "/effort" => {
+                tokio::task::block_in_place(|| pick_effort(&mut client));
+                continue;
+            }
             "/clear" => {
                 history.clear();
                 println!("{}", "context cleared".dimmed());
@@ -326,16 +419,39 @@ async fn run() -> Result<(), client::ApiError> {
             let mut content_started = false;
             let mut thought_at_line_start = true;
             let mut renderer = StreamRenderer::new();
+            let spinning = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let spin_flag = spinning.clone();
+            let spinner = std::thread::spawn(move || {
+                let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                let mut i = 0usize;
+                while spin_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    print!("\r{} Generating…", frames[i % frames.len()]);
+                    let _ = std::io::stdout().flush();
+                    std::thread::sleep(std::time::Duration::from_millis(80));
+                    i += 1;
+                }
+            });
+            let mut spinner_shown = true;
 
             let result = client
                 .complete_stream(&history, Some(&tool_defs), |ev| match ev {
                     client::StreamEvent::Reasoning(t) => {
+                        if spinner_shown {
+                            spinning.store(false, std::sync::atomic::Ordering::SeqCst);
+                            print!("\r\x1b[2K");
+                            spinner_shown = false;
+                        }
                         thought_open = true;
                         thought_at_line_start = t.ends_with('\n');
                         print!("{}", t.dimmed());
                         let _ = std::io::stdout().flush();
                     }
                     client::StreamEvent::Content(t) => {
+                        if spinner_shown {
+                            spinning.store(false, std::sync::atomic::Ordering::SeqCst);
+                            print!("\r\x1b[2K");
+                            spinner_shown = false;
+                        }
                         if !content_started {
                             content_started = true;
                             if thought_open && !thought_at_line_start {
@@ -347,6 +463,13 @@ async fn run() -> Result<(), client::ApiError> {
                     }
                 })
                 .await;
+
+            spinning.store(false, std::sync::atomic::Ordering::SeqCst);
+            let _ = spinner.join();
+            if spinner_shown {
+                print!("\r\x1b[2K");
+                let _ = std::io::stdout().flush();
+            }
 
             let completion = match result {
                 Ok(c) => c,

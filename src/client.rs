@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 pub const ENDPOINT: &str = "https://opencode.ai/inference/go/openai/v1/chat/completions";
-pub const MODEL: &str = "deepseek-v4.1-flash";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionCall {
@@ -87,6 +86,10 @@ struct ChatRequest<'a> {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<&'a serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<&'a serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -113,6 +116,8 @@ struct StreamDelta {
     content: Option<serde_json::Value>,
     #[serde(default)]
     reasoning_content: Option<serde_json::Value>,
+    #[serde(default)]
+    reasoning: Option<serde_json::Value>,
     #[serde(default)]
     tool_calls: Option<Vec<DeltaToolCall>>,
 }
@@ -241,12 +246,13 @@ fn handle_sse_line(
     let chunk: StreamChunk = serde_json::from_value(value)
         .map_err(|e| ApiError(format!("failed to parse stream chunk: {e}")))?;
     if let Some(delta) = chunk.choices.first().and_then(|c| c.delta.as_ref()) {
-        if let Some(text) = delta
+        let thought = delta
             .reasoning_content
             .as_ref()
+            .or(delta.reasoning.as_ref())
             .map(value_to_string)
-            .filter(|s| !s.is_empty())
-        {
+            .filter(|s| !s.is_empty());
+        if let Some(text) = thought {
             acc.reasoning.push_str(&text);
             on_event(StreamEvent::Reasoning(&text));
         }
@@ -292,6 +298,8 @@ pub struct Client {
     http: reqwest::Client,
     api_key: String,
     session_id: String,
+    model: String,
+    effort: Option<String>,
 }
 
 impl Client {
@@ -306,7 +314,28 @@ impl Client {
             http: reqwest::Client::new(),
             api_key,
             session_id: uuid::Uuid::new_v4().to_string(),
+            model: crate::models::DEFAULT_MODEL.to_string(),
+            effort: None,
         })
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    pub fn set_model(&mut self, id: &str) {
+        self.model = id.to_string();
+    }
+
+    pub fn effort(&self) -> Option<&str> {
+        self.effort.as_deref()
+    }
+
+    pub fn set_effort(&mut self, level: Option<&str>) {
+        self.effort = match level {
+            None | Some("auto") => None,
+            Some(other) => Some(other.to_string()),
+        };
     }
 
     pub async fn complete_stream(
@@ -315,11 +344,23 @@ impl Client {
         tools: Option<&serde_json::Value>,
         mut on_event: impl FnMut(StreamEvent),
     ) -> Result<Completion, ApiError> {
+        let effort = self.effort.as_deref();
+        let thinking = if effort == Some("off") && self.model.starts_with("deepseek") {
+            Some(serde_json::json!({"type": "disabled"}))
+        } else {
+            None
+        };
+        let reasoning_effort = match effort {
+            None | Some("off") => None,
+            Some(level) => Some(level),
+        };
         let body = ChatRequest {
-            model: MODEL,
+            model: &self.model,
             messages: history,
             stream: true,
             tools,
+            reasoning_effort,
+            thinking: thinking.as_ref(),
         };
 
         let res = self
