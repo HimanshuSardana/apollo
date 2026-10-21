@@ -1,22 +1,19 @@
-mod client;
 mod completion;
 mod highlight;
 mod markdown;
-mod models;
 mod picker;
-mod tools;
 
 use std::io::Write;
 
-use owo_colors::OwoColorize;
-use rustyline::{Editor, error::ReadlineError, history::DefaultHistory};
-use unicode_width::UnicodeWidthStr;
-
-use client::{ChatMessage, Client};
+use apollo_core::client::{self, ChatMessage, Client};
+use apollo_core::{models, tools};
 use completion::PathCompleter;
 use highlight::Lang;
 use markdown::StreamRenderer;
+use owo_colors::OwoColorize;
+use rustyline::{Editor, error::ReadlineError, history::DefaultHistory};
 use tools::Display;
+use unicode_width::UnicodeWidthStr;
 
 const MAX_TOOL_STEPS: usize = 24;
 const BASH_PREVIEW_LINES: usize = 40;
