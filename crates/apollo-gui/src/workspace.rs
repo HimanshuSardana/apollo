@@ -1,22 +1,25 @@
-//! App shell: threads sidebar (left) + dock center (one tab per thread).
+//! App shell: threads sidebar (left) + tab strip over the active thread.
 //!
-//! Clicking a thread opens it in a center tab (or focuses the existing tab).
-//! Tabs are closable; closing only removes the tab, the thread stays listed
-//! and re-clicking re-opens it.
+//! The tab strip is hand-rolled rather than delegated to the dock's
+//! [`TabBar`]: that widget pins any trailing controls to the far right of the
+//! strip, which would strand the close/new buttons a thousand pixels from the
+//! tabs they act on. Thread panels are kept alive in `panels`, so switching
+//! tabs preserves scroll position and composer state.
+//!
+//! Closing a tab drops its panel; reopening rebuilds it from the [`Thread`]'s
+//! messages, so nothing is lost that the thread itself holds.
 
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dock::{
-    DockArea, DockLayout, DockPlacement, DockSkin, PanelId, PanelStyle, panel_handle,
-};
 use gpui_kit::component::sidebar::{
     Sidebar, SidebarCollapsible, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuItem,
     SidebarToggleButton,
 };
+use gpui_kit::component::{
+    ActiveTheme as _, Icon, Sizable as _, h_flex, v_flex,
+};
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -25,13 +28,13 @@ use crate::thread::{Thread, ThreadId};
 
 actions!(apollo, [ToggleSidebar, NewThread]);
 
+/// Height of the thread tab strip.
+const TAB_STRIP_H: f32 = 34.;
+
 pub struct ApolloWorkspace {
-    dock_area: Entity<DockArea>,
-    // Retained for follow-ups (panel styling, theme switching).
-    #[allow(dead_code)]
-    skin: Rc<DockSkin>,
     threads: Vec<Thread>,
-    open_tabs: HashMap<ThreadId, PanelId>,
+    /// One live panel per open tab. Dropping an entry closes its tab.
+    panels: HashMap<ThreadId, Entity<ChatPanel>>,
     active: Option<ThreadId>,
     next_id: ThreadId,
     sidebar_collapsed: bool,
@@ -39,13 +42,9 @@ pub struct ApolloWorkspace {
 
 impl ApolloWorkspace {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (dock_area, skin) = DockSkin::dock_area("apollo-dock", Some(1), window, cx);
-        skin.set_panel_style(PanelStyle::TabBar, cx);
         let mut this = Self {
-            dock_area,
-            skin,
             threads: Vec::new(),
-            open_tabs: HashMap::new(),
+            panels: HashMap::new(),
             active: None,
             next_id: 0,
             sidebar_collapsed: false,
@@ -63,39 +62,35 @@ impl ApolloWorkspace {
     }
 
     fn open_thread(&mut self, id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.panels.contains_key(&id) {
+            let Some(thread) = self.threads.iter().find(|t| t.id == id).cloned() else {
+                return;
+            };
+            let panel = cx.new(|cx| ChatPanel::from_thread(&thread, window, cx));
+            self.panels.insert(id, panel);
+        }
         self.active = Some(id);
-        // Closing a tab does not touch this map, so drop entries whose panel the
-        // dock no longer holds instead of selecting a dead id.
-        let area = self.dock_area.clone();
-        self.open_tabs.retain(|_, pid| area.read(cx).panel(*pid).is_some());
-        if let Some(pid) = self.open_tabs.get(&id).copied() {
-            self.dock_area.update(cx, |area, cx| {
-                area.select_panel(pid, window, cx);
-            });
-            cx.notify();
-            return;
-        }
-        let Some(thread) = self.threads.iter().find(|t| t.id == id).cloned() else {
-            return;
-        };
-        let panel = cx.new(|cx| ChatPanel::from_thread(&thread, window, cx));
-        let pid = PanelId::from(panel.entity_id());
-        let handle = panel_handle(panel);
-
-        // The first tab *defines* the center layout; later tabs append to it.
-        if self.open_tabs.is_empty() {
-            let layout = DockLayout::tabs().panel_view(handle, cx);
-            self.dock_area.update(cx, |area, cx| {
-                area.set_center(layout, window, cx);
-            });
-        } else {
-            self.dock_area.update(cx, |area, cx| {
-                area.add_panel_view(handle, DockPlacement::Center, None, window, cx);
-                area.select_panel(pid, window, cx);
-            });
-        }
-        self.open_tabs.insert(id, pid);
         cx.notify();
+    }
+
+    /// Close the active tab. The thread stays in the sidebar, and the
+    /// neighbouring tab takes over so the strip is never left empty while
+    /// another tab exists.
+    fn close_tab(&mut self, id: ThreadId, cx: &mut Context<Self>) {
+        self.panels.remove(&id);
+        if self.active == Some(id) {
+            self.active = self.open_order().last().copied();
+        }
+        cx.notify();
+    }
+
+    /// Open tabs in sidebar order, which is also the order they were created.
+    fn open_order(&self) -> Vec<ThreadId> {
+        self.threads
+            .iter()
+            .map(|thread| thread.id)
+            .filter(|id| self.panels.contains_key(id))
+            .collect()
     }
 
     fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
@@ -104,8 +99,81 @@ impl ApolloWorkspace {
     }
 }
 
+impl ApolloWorkspace {
+    fn render_tab_strip(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let active = self.active;
+
+        let tabs = self.open_order().into_iter().map(|id| {
+            let Some(thread) = self.threads.iter().find(|t| t.id == id) else {
+                return div().into_any_element();
+            };
+            let title = thread.title.clone();
+            let selected = Some(id) == active;
+            div()
+                .id(("tab", id))
+                .flex_shrink_0()
+                .h_full()
+                .px_3()
+                .flex()
+                .items_center()
+                .gap_2()
+                .rounded_t(px(6.))
+                .text_sm()
+                .whitespace_nowrap()
+                .when(selected, |this| {
+                    this.bg(theme.background).text_color(theme.foreground)
+                })
+                .when(!selected, |this| {
+                    this.text_color(theme.muted_foreground)
+                        .hover(|this| this.text_color(theme.foreground))
+                })
+                .child(title)
+                .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+                    this.open_thread(id, window, cx);
+                }))
+                .into_any_element()
+        });
+
+        h_flex()
+            .h(px(TAB_STRIP_H))
+            .flex_shrink_0()
+            .w_full()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .border_b_1()
+            .border_color(theme.border)
+            .bg(theme.tokens.tab_bar)
+            .children(tabs)
+            .when_some(active, |this, id| {
+                this.child(
+                    Button::new("tab-close")
+                        .icon(IconName::X)
+                        .xsmall()
+                        .ghost()
+                        .tooltip("Close tab")
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.close_tab(id, cx);
+                        })),
+                )
+            })
+            .child(
+                Button::new("tab-new-thread")
+                    .icon(IconName::Plus)
+                    .xsmall()
+                    .ghost()
+                    .tooltip("New thread")
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.new_thread(window, cx);
+                    })),
+            )
+    }
+}
+
 impl Render for ApolloWorkspace {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
         let active = self.active;
         let collapsed = self.sidebar_collapsed;
 
@@ -137,7 +205,7 @@ impl Render for ApolloWorkspace {
                             this.child(
                                 div()
                                     .text_xs()
-                                    .text_color(cx.theme().sidebar_foreground.opacity(0.7))
+                                    .text_color(theme.sidebar_foreground.opacity(0.7))
                                     .child("Threads"),
                             )
                         })
@@ -177,6 +245,20 @@ impl Render for ApolloWorkspace {
                 ),
             );
 
+        let body = match active.and_then(|id| self.panels.get(&id)) {
+            Some(panel) => AnyView::from(panel.clone()).into_any_element(),
+            None => v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .text_color(theme.muted_foreground)
+                .child(Icon::new(IconName::MessageCircle).size(px(20.)))
+                .child(div().text_sm().child("No open threads"))
+                .child(div().text_xs().child("Pick one in the sidebar to open it"))
+                .into_any_element(),
+        };
+
         h_flex()
             .size_full()
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
@@ -187,12 +269,14 @@ impl Render for ApolloWorkspace {
             }))
             .child(sidebar)
             .child(
-                div()
+                v_flex()
                     .flex_1()
                     .h_full()
                     .min_w_0()
                     .min_h_0()
-                    .child(self.dock_area.clone()),
+                    .bg(theme.background)
+                    .child(self.render_tab_strip(cx))
+                    .child(div().flex_1().min_h_0().w_full().child(body)),
             )
     }
 }
