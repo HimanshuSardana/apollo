@@ -5,7 +5,9 @@
 //! [`Thread`](crate::thread::Thread) in [`ApolloWorkspace`](crate::workspace::ApolloWorkspace).
 //! All agent logic (client, tools, models) is shared from `apollo-core`.
 
+mod markdown;
 mod panels;
+mod theme;
 mod thread;
 mod workspace;
 
@@ -19,6 +21,7 @@ fn main() {
 
     app.run(move |cx| {
         gpui_kit::init(cx);
+        theme::init(cx);
 
         let window_options = gpui_kit::WindowOptions {
             window_bounds: Some(gpui_kit::WindowBounds::Windowed(

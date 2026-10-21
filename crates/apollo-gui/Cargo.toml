@@ -2,7 +2,7 @@
 name = "apollo-gui"
 version = "0.1.0"
 edition = "2021"
-description = "Apollo native GUI (GPUI). Skeleton — UI lands after the monorepo split."
+description = "Apollo native GUI (GPUI): threads sidebar + dock chat tabs."
 
 [[bin]]
 name = "apollo-gui"
@@ -22,4 +22,6 @@ full = ["full-tools", "mcp", "subagents", "plan-mode"]
 
 [dependencies]
 apollo-core = { path = "../apollo-core" }
-gpui-kit = "0.8"
+gpui-kit = { version = "0.8", features = ["syntect"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
