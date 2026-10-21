@@ -1,0 +1,25 @@
+[package]
+name = "apollo-core"
+version = "0.1.0"
+edition = "2021"
+description = "Shared agent logic for apollo (client, models, tools, harness manifest). UI-agnostic."
+
+[features]
+default = ["tool-read", "tool-write", "tool-edit", "tool-bash"]
+tool-read = []
+tool-write = []
+tool-edit = []
+tool-bash = []
+full-tools = ["tool-read", "tool-write", "tool-edit", "tool-bash"]
+# Future harness capabilities (stub modules for now so the wizard can target them).
+mcp = []
+subagents = []
+plan-mode = []
+harness-full = ["full-tools", "mcp", "subagents", "plan-mode"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "default-tls"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util"] }
+uuid = { version = "1", features = ["v4"] }

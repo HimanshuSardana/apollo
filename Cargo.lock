@@ -3,18 +3,34 @@
 version = 4
 
 [[package]]
-name = "apollo"
+name = "apollo-cli"
 version = "0.1.0"
 dependencies = [
+ "apollo-core",
  "crossterm",
  "owo-colors",
- "reqwest",
  "rustyline",
- "serde",
  "serde_json",
  "tokio",
  "unicode-width",
+]
+
+[[package]]
+name = "apollo-core"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
  "uuid",
+]
+
+[[package]]
+name = "apollo-gui"
+version = "0.1.0"
+dependencies = [
+ "apollo-core",
 ]
 
 [[package]]

@@ -1,0 +1,26 @@
+[package]
+name = "apollo-gui"
+version = "0.1.0"
+edition = "2021"
+description = "Apollo native GUI (GPUI). Skeleton — UI lands after the monorepo split."
+
+[[bin]]
+name = "apollo-gui"
+path = "src/main.rs"
+
+[features]
+default = ["full"]
+tool-read = ["apollo-core/tool-read"]
+tool-write = ["apollo-core/tool-write"]
+tool-edit = ["apollo-core/tool-edit"]
+tool-bash = ["apollo-core/tool-bash"]
+full-tools = ["tool-read", "tool-write", "tool-edit", "tool-bash"]
+mcp = ["apollo-core/mcp"]
+subagents = ["apollo-core/subagents"]
+plan-mode = ["apollo-core/plan-mode"]
+full = ["full-tools", "mcp", "subagents", "plan-mode"]
+
+[dependencies]
+apollo-core = { path = "../apollo-core" }
+# GPUI lands here next. Pinned with the kit together (they break together):
+# gpui = { version = "0.2" }

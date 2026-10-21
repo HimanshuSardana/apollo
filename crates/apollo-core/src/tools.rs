@@ -10,6 +10,30 @@ const MAX_READ_BYTES: usize = 50 * 1024;
 const MAX_OUTPUT_BYTES: usize = 30 * 1024;
 const DEFAULT_BASH_TIMEOUT: u64 = 120;
 
+/// Every tool apollo-core can compile in. Used by the wizard to list choices.
+pub const ALL_TOOLS: &[&str] = &["read", "write", "edit", "bash"];
+
+/// Is `name` compiled into this binary? (feature `tool-<name>` enabled)
+pub fn is_enabled(name: &str) -> bool {
+    match name {
+        #[cfg(feature = "tool-read")]
+        "read" => true,
+        #[cfg(feature = "tool-write")]
+        "write" => true,
+        #[cfg(feature = "tool-edit")]
+        "edit" => true,
+        #[cfg(feature = "tool-bash")]
+        "bash" => true,
+        _ => false,
+    }
+}
+
+fn disabled(name: &str) -> Outcome {
+    Outcome::error(format!(
+        "error: tool `{name}` is not enabled in this build (rebuild with --features tool-{name})"
+    ))
+}
+
 #[derive(Debug, Clone)]
 pub enum Display {
     Code {
@@ -43,8 +67,9 @@ impl Outcome {
 }
 
 pub fn definitions() -> Value {
-    json!([
-        {
+    let mut defs: Vec<Value> = Vec::new();
+    #[cfg(feature = "tool-read")]
+    defs.push(json!({
             "type": "function",
             "function": {
                 "name": "read",
@@ -59,8 +84,9 @@ pub fn definitions() -> Value {
                     "required": ["path"]
                 }
             }
-        },
-        {
+        }));
+    #[cfg(feature = "tool-write")]
+    defs.push(json!({
             "type": "function",
             "function": {
                 "name": "write",
@@ -74,8 +100,9 @@ pub fn definitions() -> Value {
                     "required": ["path", "content"]
                 }
             }
-        },
-        {
+        }));
+    #[cfg(feature = "tool-edit")]
+    defs.push(json!({
             "type": "function",
             "function": {
                 "name": "edit",
@@ -91,8 +118,9 @@ pub fn definitions() -> Value {
                     "required": ["path", "old_string", "new_string"]
                 }
             }
-        },
-        {
+        }));
+    #[cfg(feature = "tool-bash")]
+    defs.push(json!({
             "type": "function",
             "function": {
                 "name": "bash",
@@ -107,8 +135,8 @@ pub fn definitions() -> Value {
                     "required": ["command"]
                 }
             }
-        }
-    ])
+        }));
+    Value::Array(defs)
 }
 
 pub fn execute(name: &str, raw_args: &str) -> Outcome {
@@ -122,10 +150,30 @@ pub fn execute(name: &str, raw_args: &str) -> Outcome {
         }
     };
     match name {
-        "read" => read(&args),
-        "write" => write(&args),
-        "edit" => edit(&args),
-        "bash" => bash(&args),
+        "read" => {
+            #[cfg(feature = "tool-read")]
+            return read(&args);
+            #[allow(unreachable_code)]
+            disabled("read")
+        }
+        "write" => {
+            #[cfg(feature = "tool-write")]
+            return write(&args);
+            #[allow(unreachable_code)]
+            disabled("write")
+        }
+        "edit" => {
+            #[cfg(feature = "tool-edit")]
+            return edit(&args);
+            #[allow(unreachable_code)]
+            disabled("edit")
+        }
+        "bash" => {
+            #[cfg(feature = "tool-bash")]
+            return bash(&args);
+            #[allow(unreachable_code)]
+            disabled("bash")
+        }
         other => Outcome::error(format!("error: unknown tool `{other}`")),
     }
 }
@@ -170,6 +218,7 @@ fn truncate_bytes(s: &str, max: usize) -> String {
     )
 }
 
+#[allow(dead_code)]
 fn read(args: &Value) -> Outcome {
     let path = match get_str(args, "path") {
         Ok(p) => p,
@@ -258,6 +307,7 @@ fn read(args: &Value) -> Outcome {
     }
 }
 
+#[allow(dead_code)]
 fn write(args: &Value) -> Outcome {
     let path = match get_str(args, "path") {
         Ok(p) => p,
@@ -291,6 +341,7 @@ fn write(args: &Value) -> Outcome {
     }
 }
 
+#[allow(dead_code)]
 fn edit(args: &Value) -> Outcome {
     let path = match get_str(args, "path") {
         Ok(p) => p,
@@ -350,6 +401,7 @@ fn edit(args: &Value) -> Outcome {
     }
 }
 
+#[allow(dead_code)]
 fn bash(args: &Value) -> Outcome {
     let command = match get_str(args, "command") {
         Ok(c) => c,
