@@ -5,23 +5,25 @@
 //! [`Thread`](crate::thread::Thread) in [`ApolloWorkspace`](crate::workspace::ApolloWorkspace).
 //! All agent logic (client, tools, models) is shared from `apollo-core`.
 
+mod app_assets;
 mod markdown;
 mod panels;
 mod theme;
 mod thread;
 mod workspace;
 
-use gpui_kit::assets::Assets;
+use app_assets::ApolloAssets;
 use gpui_kit::component::Root;
 use gpui_kit::AppContext as _;
-use workspace::ApolloWorkspace;
+use workspace::{ApolloWorkspace, ToggleSidebar};
 
 fn main() {
-    let app = gpui_kit::application().with_assets(Assets);
+    let app = gpui_kit::application().with_assets(ApolloAssets);
 
     app.run(move |cx| {
         gpui_kit::init(cx);
         theme::init(cx);
+        cx.bind_keys(vec![gpui_kit::KeyBinding::new("ctrl-b", ToggleSidebar, None)]);
 
         let window_options = gpui_kit::WindowOptions {
             window_bounds: Some(gpui_kit::WindowBounds::Windowed(

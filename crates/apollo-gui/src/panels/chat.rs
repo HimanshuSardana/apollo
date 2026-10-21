@@ -10,8 +10,9 @@ use std::collections::{HashMap, HashSet};
 use apollo_core::client::{ChatMessage, Client, ToolCall};
 use apollo_core::{models, tools};
 use gpui_kit::assets::IconName;
+use gpui_kit::component::button::Button;
 use gpui_kit::component::collapsible::Collapsible;
-use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent};
+use gpui_kit::component::dock::{BasePanel, ClosePanel, Panel, PanelEvent};
 use gpui_kit::component::input::{
     Editor, EditorState, Input, InputEvent, InputState, Textarea, TextareaState,
 };
@@ -24,6 +25,7 @@ use gpui_kit::*;
 
 use crate::markdown::{self, Segment};
 use crate::thread::{Thread, ThreadId};
+use crate::workspace::NewThread;
 
 const MAX_TOOL_STEPS: usize = 24;
 const COMPOSER_MAX_H: f32 = 200.;
@@ -123,6 +125,7 @@ impl ChatPanel {
             }
         });
         this._subs.push(sub);
+
         this
     }
 
@@ -599,6 +602,7 @@ impl ChatPanel {
             .flex_1()
             .min_h_0()
             .w_full()
+            .items_center()
             .overflow_y_scroll()
             .px_5()
             .py_4()
@@ -1060,6 +1064,24 @@ impl Panel for ChatPanel {
 
     fn title(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.title.clone()
+    }
+
+    /// Trailing tab-strip controls: close this tab, or start a new thread.
+    fn toolbar_buttons(
+        &mut self,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Vec<Button>> {
+        Some(vec![
+            Button::new("tab-close")
+                .icon(IconName::X)
+                .tooltip("Close tab")
+                .on_click(|_, window, cx| window.dispatch_action(Box::new(ClosePanel), cx)),
+            Button::new("tab-new-thread")
+                .icon(IconName::Plus)
+                .tooltip("New thread")
+                .on_click(|_, window, cx| window.dispatch_action(Box::new(NewThread), cx)),
+        ])
     }
 }
 
