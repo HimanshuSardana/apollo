@@ -22,6 +22,8 @@ use gpui_kit::*;
 use crate::panels::chat::ChatPanel;
 use crate::thread::{Thread, ThreadId};
 
+actions!(apollo, [ToggleSidebar]);
+
 pub struct ApolloWorkspace {
     dock_area: Entity<DockArea>,
     // Retained for follow-ups (panel styling, theme switching).
@@ -90,6 +92,11 @@ impl ApolloWorkspace {
         self.open_tabs.insert(id, pid);
         cx.notify();
     }
+
+    fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_collapsed = !self.sidebar_collapsed;
+        cx.notify();
+    }
 }
 
 impl Render for ApolloWorkspace {
@@ -155,6 +162,9 @@ impl Render for ApolloWorkspace {
 
         h_flex()
             .size_full()
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
+                this.toggle_sidebar(cx);
+            }))
             .child(sidebar)
             .child(
                 div()
