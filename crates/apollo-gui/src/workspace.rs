@@ -71,7 +71,7 @@ impl ApolloWorkspace {
         let Some(thread) = self.threads.iter().find(|t| t.id == id).cloned() else {
             return;
         };
-        let panel = cx.new(|cx| ChatPanel::from_thread(&thread, cx));
+        let panel = cx.new(|cx| ChatPanel::from_thread(&thread, window, cx));
         let pid = PanelId::from(panel.entity_id());
         let handle = panel_handle(panel);
 

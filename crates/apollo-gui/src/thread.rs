@@ -1,10 +1,10 @@
 //! Agent thread model shared by the sidebar and the chat tabs.
 //!
-//! A [`Thread`] is the GUI analogue of one CLI session: a title, a model,
-//! and the apollo-core message history. The workspace owns the list; each
-//! open thread also gets a dock tab rendering a snapshot.
-
-use apollo_core::client::ChatMessage;
+//! A [`Thread`] is the GUI analogue of one CLI session: a title and a model.
+//! The workspace owns the list; the open tab's [`ChatPanel`] owns the live
+//! message history for that thread.
+//!
+//! [`ChatPanel`]: crate::panels::chat::ChatPanel
 
 pub type ThreadId = usize;
 
@@ -13,7 +13,6 @@ pub struct Thread {
     pub id: ThreadId,
     pub title: String,
     pub model: String,
-    pub messages: Vec<ChatMessage>,
 }
 
 impl Thread {
@@ -22,7 +21,6 @@ impl Thread {
             id,
             title: format!("Thread {id}"),
             model: model.into(),
-            messages: Vec::new(),
         }
     }
 }
