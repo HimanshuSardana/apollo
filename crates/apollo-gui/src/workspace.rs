@@ -12,17 +12,18 @@ use gpui_kit::component::dock::{
     DockArea, DockLayout, DockPlacement, DockSkin, PanelId, PanelStyle, panel_handle,
 };
 use gpui_kit::component::sidebar::{
-    Sidebar, SidebarCollapsible, SidebarFooter, SidebarGroup, SidebarHeader, SidebarMenu,
-    SidebarMenuItem, SidebarToggleButton,
+    Sidebar, SidebarCollapsible, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuItem,
+    SidebarToggleButton,
 };
 use gpui_kit::assets::IconName;
-use gpui_kit::component::{Sizable as _, StyledExt as _, h_flex};
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::panels::chat::ChatPanel;
 use crate::thread::{Thread, ThreadId};
 
-actions!(apollo, [ToggleSidebar]);
+actions!(apollo, [ToggleSidebar, NewThread]);
 
 pub struct ApolloWorkspace {
     dock_area: Entity<DockArea>,
@@ -63,6 +64,10 @@ impl ApolloWorkspace {
 
     fn open_thread(&mut self, id: ThreadId, window: &mut Window, cx: &mut Context<Self>) {
         self.active = Some(id);
+        // Closing a tab does not touch this map, so drop entries whose panel the
+        // dock no longer holds instead of selecting a dead id.
+        let area = self.dock_area.clone();
+        self.open_tabs.retain(|_, pid| area.read(cx).panel(*pid).is_some());
         if let Some(pid) = self.open_tabs.get(&id).copied() {
             self.dock_area.update(cx, |area, cx| {
                 area.select_panel(pid, window, cx);
@@ -123,20 +128,32 @@ impl Render for ApolloWorkspace {
             .collapsed(collapsed)
             .w(px(260.))
             .header(
-                SidebarHeader::new()
-                    .child(div().font_bold().child("apollo"))
-                    .child(
-                        Button::new("new-thread")
-                            .icon(IconName::Plus)
-                            .xsmall()
-                            .ghost()
-                            .tooltip("New thread")
-                            .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                this.new_thread(window, cx);
-                            })),
-                    ),
+                SidebarHeader::new().child(
+                    h_flex()
+                        .w_full()
+                        .items_center()
+                        .justify_between()
+                        .when(!collapsed, |this| {
+                            this.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().sidebar_foreground.opacity(0.7))
+                                    .child("Threads"),
+                            )
+                        })
+                        .child(
+                            Button::new("new-thread")
+                                .icon(IconName::Plus)
+                                .xsmall()
+                                .ghost()
+                                .tooltip("New thread")
+                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                                    this.new_thread(window, cx);
+                                })),
+                        ),
+                ),
             )
-            .child(SidebarGroup::new("Threads").child(menu))
+            .child(menu)
             .footer(
                 SidebarFooter::new().child(
                     h_flex()
@@ -164,6 +181,9 @@ impl Render for ApolloWorkspace {
             .size_full()
             .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
                 this.toggle_sidebar(cx);
+            }))
+            .on_action(cx.listener(|this, _: &NewThread, window, cx| {
+                this.new_thread(window, cx);
             }))
             .child(sidebar)
             .child(
